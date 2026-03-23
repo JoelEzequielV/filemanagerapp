@@ -12,7 +12,7 @@ import {
 import { useEffect, useState } from "react";
 import { readDirectory, FileItem } from "../services/fileService";
 import { requestStoragePermissions } from "../services/permissionService";
-
+import { pickDirectory } from "../services/safService";
 
 const Home: React.FC = () => {
   const [files, setFiles] = useState<FileItem[]>([]);
@@ -77,7 +77,12 @@ const Home: React.FC = () => {
 
       <IonContent className="ion-padding">
 
-
+        <IonButton onClick={async () => {
+          const uri = await pickDirectory();
+          console.log("Carpeta elegida:", uri);
+        }}>
+          Elegir carpeta real
+        </IonButton>
         
         <IonButton onClick={goBack}>Volver</IonButton>
 
