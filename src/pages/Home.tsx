@@ -13,9 +13,10 @@ import { useEffect, useState } from "react";
 import { readDirectory, FileItem } from "../services/fileService";
 import { requestStoragePermissions } from "../services/permissionService";
 
+
 const Home: React.FC = () => {
   const [files, setFiles] = useState<FileItem[]>([]);
-  const [path, setPath] = useState("storage/emulated/0");
+  const [path, setPath] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -49,7 +50,7 @@ const Home: React.FC = () => {
         return;
       }
 
-      await load("storage/emulated/0");
+      await load("");
     };
 
     init();
@@ -76,6 +77,8 @@ const Home: React.FC = () => {
 
       <IonContent className="ion-padding">
 
+
+        
         <IonButton onClick={goBack}>Volver</IonButton>
 
         {/* ⏳ LOADING */}
@@ -92,7 +95,7 @@ const Home: React.FC = () => {
             <p style={{ textAlign: "center" }}>{error}</p>
           </IonText>
         )}
-
+        <p><strong>Ruta:</strong> {path || "Root"}</p>
         {/* 📂 LISTA */}
         {!loading && !error && (
           <>
