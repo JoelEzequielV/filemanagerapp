@@ -1,9 +1,9 @@
-import type { CapacitorConfig } from '@capacitor/cli';
 
-const config: CapacitorConfig = {
-  appId: 'io.ionic.starter',
+const config = {
+  appId: 'com.filemanager.app',
   appName: 'file-manager',
-  webDir: 'dist'
+  webDir: 'dist',
+  bundledWebRuntime: false
 };
 
 export default config;
