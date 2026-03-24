@@ -1,7 +1,9 @@
 package io.ionic.starter;
-import io.ionic.starter.SafPlugin;
+
 import android.os.Bundle;
 import com.getcapacitor.BridgeActivity;
+/* import com.yourcompany.saf.SafPlugin;  */
+import io.ionic.starter.SafPlugin; 
 
 public class MainActivity extends BridgeActivity {
 
@@ -9,6 +11,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        // 🔥 REGISTRO MANUAL FORZADO
         registerPlugin(SafPlugin.class);
     }
 }
