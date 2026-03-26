@@ -17,9 +17,15 @@ import {
   folderOutline,
   documentOutline,
   arrowBackOutline,
-  folderOpenOutline
+  folderOpenOutline,
+  imageOutline,
+  videocamOutline,
+  musicalNotesOutline,
+  codeSlashOutline,
+  documentTextOutline
 } from 'ionicons/icons';
 
+import { formatBytes, formatDate } from '../utils/fileFormat';
 import { useState } from 'react';
 import { pickDirectory, listFiles } from '../services/safService';
 import type { FileItem, FolderResponse } from '../types/file';
@@ -41,7 +47,14 @@ const Home: React.FC = () => {
         setHistory((prev) => [...prev, currentUri]);
       }
 
-      setFiles(result.files);
+      const sortedFiles = [...result.files].sort((a, b) => {
+        if (a.type === 'directory' && b.type !== 'directory') return -1;
+        if (a.type !== 'directory' && b.type === 'directory') return 1;
+      
+        return a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
+      });
+      
+      setFiles(sortedFiles);
       setCurrentUri(result.currentUri);
       setCurrentName(result.currentName || 'Carpeta');
     } catch (error) {
@@ -76,7 +89,14 @@ const Home: React.FC = () => {
 
       const result: FolderResponse = await listFiles(previousUri);
 
-      setFiles(result.files);
+      const sortedFiles = [...result.files].sort((a, b) => {
+        if (a.type === 'directory' && b.type !== 'directory') return -1;
+        if (a.type !== 'directory' && b.type === 'directory') return 1;
+      
+        return a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
+      });
+      
+      setFiles(sortedFiles);
       setCurrentUri(result.currentUri);
       setCurrentName(result.currentName || 'Carpeta');
       setHistory(newHistory);
@@ -91,9 +111,29 @@ const Home: React.FC = () => {
     if (item.type === 'directory') {
       await loadFolder(item.uri, true);
     } else {
-      console.log('Archivo seleccionado:', item);
-      // después acá vamos a abrir archivos reales
+      console.log('Archivo seleccionado:', {
+        name: item.name,
+        uri: item.uri,
+        size: item.size,
+        lastModified: item.lastModified
+      });
     }
+  };
+
+  const getFileIcon = (item: FileItem) => {
+    if (item.type === 'directory') return folderOutline;
+  
+    const ext = item.name?.split('.').pop()?.toLowerCase();
+  
+    if (!ext) return documentOutline;
+  
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) return imageOutline;
+    if (['mp4', 'mkv', 'avi', 'mov'].includes(ext)) return videocamOutline;
+    if (['mp3', 'wav', 'ogg', 'flac'].includes(ext)) return musicalNotesOutline;
+    if (['js', 'ts', 'tsx', 'jsx', 'json', 'html', 'css', 'java', 'kt', 'xml'].includes(ext)) return codeSlashOutline;
+    if (['txt', 'pdf', 'doc', 'docx'].includes(ext)) return documentTextOutline;
+  
+    return documentOutline;
   };
 
   return (
@@ -122,7 +162,12 @@ const Home: React.FC = () => {
         </div>
 
         <IonText color="medium">
-          <p><strong>Ruta actual:</strong> {currentName}</p>
+          <p style={{ marginBottom: '6px' }}>
+            <strong>Carpeta actual:</strong> {currentName}
+          </p>
+          <p style={{ fontSize: '13px', opacity: 0.8 }}>
+            {files.length} elemento(s)
+          </p>
         </IonText>
 
         {loading && (
@@ -149,12 +194,17 @@ const Home: React.FC = () => {
                 onClick={() => handleOpenItem(item)}
               >
                 <IonIcon
-                  icon={item.type === 'directory' ? folderOutline : documentOutline}
+                  icon={getFileIcon(item)}
                   slot="start"
+                  style={{ fontSize: '24px' }}
                 />
                 <IonLabel>
-                  <h2>{item.name}</h2>
-                  <p>{item.type === 'directory' ? 'Carpeta' : 'Archivo'}</p>
+                  <h2 style={{ fontWeight: 600 }}>{item.name}</h2>
+                  <p style={{ fontSize: '13px', opacity: 0.8 }}>
+                    {item.type === 'directory'
+                      ? 'Carpeta'
+                      : `${formatBytes(item.size)} • ${formatDate(item.lastModified)}`}
+                  </p>
                 </IonLabel>
               </IonItem>
             ))}

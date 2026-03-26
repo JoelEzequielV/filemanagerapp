@@ -36,7 +36,7 @@ public class SafPlugin extends Plugin {
             Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
         );
 
-        // 👇 ESTE NOMBRE DEBE COINCIDIR CON EL MÉTODO @ActivityCallback
+        // IMPORTANTE: el nombre debe coincidir con el método @ActivityCallback
         startActivityForResult(call, intent, "pickDirectoryResult");
     }
 

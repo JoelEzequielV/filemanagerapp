@@ -33,7 +33,7 @@ public class SafPlugin extends Plugin {
             Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
         );
     
-        startActivityForResult(call, intent, "safResult");
+        startActivityForResult(call, intent, "pickDirectoryResult");
     }
 
     @Override
