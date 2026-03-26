@@ -31,20 +31,67 @@ import {
 } from 'ionicons/icons';
 
 import { formatBytes, formatDate } from '../utils/fileFormat';
+import { getMimeType } from '../utils/mime';
 import { useEffect, useState } from 'react';
-import { pickDirectory, listFiles } from '../services/safService';
+import { pickDirectory, listFiles, openFile } from '../services/safService';
 import type { FileItem, FolderResponse } from '../types/file';
 
 const Home: React.FC = () => {
   const [files, setFiles] = useState<FileItem[]>([]);
-  const [search, setSearch] = useState('');
   const [allFiles, setAllFiles] = useState<FileItem[]>([]);
+  const [search, setSearch] = useState('');
   const [currentUri, setCurrentUri] = useState<string | null>(null);
   const [currentName, setCurrentName] = useState<string>('root');
   const [history, setHistory] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [sortBy, setSortBy] = useState<'name' | 'date' | 'size'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+
+  const sortFiles = (
+    items: FileItem[],
+    criteria: 'name' | 'date' | 'size' = sortBy,
+    order: 'asc' | 'desc' = sortOrder
+  ) => {
+    return [...items].sort((a, b) => {
+      // Carpetas siempre primero
+      if (a.type === 'directory' && b.type !== 'directory') return -1;
+      if (a.type !== 'directory' && b.type === 'directory') return 1;
+
+      let comparison = 0;
+
+      if (criteria === 'name') {
+        comparison = a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
+      }
+
+      if (criteria === 'date') {
+        comparison = a.lastModified - b.lastModified;
+      }
+
+      if (criteria === 'size') {
+        comparison = a.size - b.size;
+      }
+
+      return order === 'asc' ? comparison : -comparison;
+    });
+  };
+
+  const applyFiltersAndSort = (items: FileItem[], term: string = search) => {
+    let filtered = [...items];
+    const searchTerm = term.trim().toLowerCase();
+
+    if (searchTerm) {
+      filtered = filtered.filter((item) =>
+        item.name.toLowerCase().includes(searchTerm)
+      );
+    }
+
+    return sortFiles(filtered, sortBy, sortOrder);
+  };
+
+  const handleSearch = (value: string) => {
+    setSearch(value);
+    setFiles(applyFiltersAndSort(allFiles, value));
+  };
 
   const loadFolder = async (uri: string, pushHistory = true) => {
     try {
@@ -61,12 +108,11 @@ const Home: React.FC = () => {
       setAllFiles(baseFiles);
       setSearch('');
       setFiles(sortFiles(baseFiles, sortBy, sortOrder));
-      
-   
       setCurrentUri(result.currentUri);
       setCurrentName(result.currentName || 'Carpeta');
     } catch (error) {
       console.error('Error cargando carpeta:', error);
+      alert('No se pudo cargar la carpeta');
     } finally {
       setLoading(false);
     }
@@ -81,6 +127,7 @@ const Home: React.FC = () => {
       await loadFolder(result.uri, false);
     } catch (error) {
       console.error('Error SAF:', error);
+      alert('No se pudo seleccionar la carpeta');
     } finally {
       setLoading(false);
     }
@@ -96,100 +143,52 @@ const Home: React.FC = () => {
       setLoading(true);
 
       const result: FolderResponse = await listFiles(previousUri);
-
       const baseFiles = [...result.files];
 
       setAllFiles(baseFiles);
       setSearch('');
       setFiles(sortFiles(baseFiles, sortBy, sortOrder));
-      
-     
       setCurrentUri(result.currentUri);
       setCurrentName(result.currentName || 'Carpeta');
       setHistory(newHistory);
     } catch (error) {
       console.error('Error volviendo atrás:', error);
+      alert('No se pudo volver a la carpeta anterior');
     } finally {
       setLoading(false);
     }
   };
 
   const handleOpenItem = async (item: FileItem) => {
-    if (item.type === 'directory') {
-      await loadFolder(item.uri, true);
-    } else {
-      console.log('Archivo seleccionado:', {
-        name: item.name,
-        uri: item.uri,
-        size: item.size,
-        lastModified: item.lastModified
-      });
+    try {
+      if (item.type === 'directory') {
+        await loadFolder(item.uri, true);
+        return;
+      }
+
+      const mimeType = getMimeType(item.name);
+
+      await openFile(item.uri, mimeType);
+    } catch (error) {
+      console.error('Error al abrir elemento:', error);
+      alert('No se pudo abrir este archivo en el dispositivo');
     }
   };
 
   const getFileIcon = (item: FileItem) => {
     if (item.type === 'directory') return folderOutline;
-  
+
     const ext = item.name?.split('.').pop()?.toLowerCase();
-  
+
     if (!ext) return documentOutline;
-  
+
     if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) return imageOutline;
     if (['mp4', 'mkv', 'avi', 'mov'].includes(ext)) return videocamOutline;
     if (['mp3', 'wav', 'ogg', 'flac'].includes(ext)) return musicalNotesOutline;
     if (['js', 'ts', 'tsx', 'jsx', 'json', 'html', 'css', 'java', 'kt', 'xml'].includes(ext)) return codeSlashOutline;
     if (['txt', 'pdf', 'doc', 'docx'].includes(ext)) return documentTextOutline;
-  
+
     return documentOutline;
-  };
-  /* CENTRALIZAR ORDENAMIENTO */
-  const sortFiles = (
-    items: FileItem[],
-    criteria: 'name' | 'date' | 'size' = sortBy,
-    order: 'asc' | 'desc' = sortOrder
-  ) => {
-    return [...items].sort((a, b) => {
-      // Siempre carpetas primero
-      if (a.type === 'directory' && b.type !== 'directory') return -1;
-      if (a.type !== 'directory' && b.type === 'directory') return 1;
-  
-      let comparison = 0;
-  
-      if (criteria === 'name') {
-        comparison = a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
-      }
-  
-      if (criteria === 'date') {
-        comparison = a.lastModified - b.lastModified;
-      }
-  
-      if (criteria === 'size') {
-        comparison = a.size - b.size;
-      }
-  
-      return order === 'asc' ? comparison : -comparison;
-    });
-  };
-
-  /* AGREGAR LA FUNCIÓN DE FILTRADO */
-  const handleSearch = (value: string) => {
-    setSearch(value);
-    setFiles(applyFiltersAndSort(allFiles, value));
-  };
-
-  /* REAPLICAR ORDEN CUANDO CAMBIA FILTRO */
-  const applyFiltersAndSort = (items: FileItem[], term: string = search) => {
-    let filtered = [...items];
-  
-    const searchTerm = term.trim().toLowerCase();
-  
-    if (searchTerm) {
-      filtered = filtered.filter((item) =>
-        item.name.toLowerCase().includes(searchTerm)
-      );
-    }
-  
-    return sortFiles(filtered, sortBy, sortOrder);
   };
 
   useEffect(() => {
@@ -206,7 +205,7 @@ const Home: React.FC = () => {
 
       <IonContent className="ion-padding">
         <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
-          <IonButton onClick={handlePickDirectory}>
+          <IonButton onClick={handlePickDirectory} disabled={loading}>
             Elegir carpeta real
           </IonButton>
 
@@ -232,37 +231,39 @@ const Home: React.FC = () => {
 
         <IonSearchbar
           value={search}
-          onIonInput={(e) => handleSearch(e.detail.value!)}
+          onIonInput={(e) => handleSearch(e.detail.value || '')}
           placeholder="Buscar archivos o carpetas..."
           debounce={250}
           style={{ marginTop: '10px', marginBottom: '14px' }}
         />
-        <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
-        <IonSelect
-          value={sortBy}
-          placeholder="Ordenar por"
-          onIonChange={(e) => setSortBy(e.detail.value)}
-          interface="popover"
-          style={{ minWidth: '160px' }}
-        >
-          <IonSelectOption value="name">Nombre</IonSelectOption>
-          <IonSelectOption value="date">Fecha</IonSelectOption>
-          <IonSelectOption value="size">Tamaño</IonSelectOption>
-        </IonSelect>
 
-        <IonSegment
-          value={sortOrder}
-          onIonChange={(e) => setSortOrder(e.detail.value)}
-          style={{ flex: 1, minWidth: '180px' }}
-        >
-          <IonSegmentButton value="asc">
-            <IonLabel>Asc</IonLabel>
-          </IonSegmentButton>
-          <IonSegmentButton value="desc">
-            <IonLabel>Desc</IonLabel>
-          </IonSegmentButton>
-        </IonSegment>
-      </div>
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
+          <IonSelect
+            value={sortBy}
+            placeholder="Ordenar por"
+            onIonChange={(e) => setSortBy(e.detail.value)}
+            interface="popover"
+            style={{ minWidth: '160px' }}
+          >
+            <IonSelectOption value="name">Nombre</IonSelectOption>
+            <IonSelectOption value="date">Fecha</IonSelectOption>
+            <IonSelectOption value="size">Tamaño</IonSelectOption>
+          </IonSelect>
+
+          <IonSegment
+            value={sortOrder}
+            onIonChange={(e) => setSortOrder(e.detail.value)}
+            style={{ flex: 1, minWidth: '180px' }}
+          >
+            <IonSegmentButton value="asc">
+              <IonLabel>Asc</IonLabel>
+            </IonSegmentButton>
+            <IonSegmentButton value="desc">
+              <IonLabel>Desc</IonLabel>
+            </IonSegmentButton>
+          </IonSegment>
+        </div>
+
         {loading && (
           <div style={{ textAlign: 'center', marginTop: '30px' }}>
             <IonSpinner name="crescent" />
@@ -281,7 +282,7 @@ const Home: React.FC = () => {
           <IonList>
             {files.map((item, index) => (
               <IonItem
-                key={index}
+                key={`${item.uri}-${index}`}
                 button
                 detail
                 onClick={() => handleOpenItem(item)}
@@ -291,6 +292,7 @@ const Home: React.FC = () => {
                   slot="start"
                   style={{ fontSize: '24px' }}
                 />
+
                 <IonLabel>
                   <h2 style={{ fontWeight: 600 }}>{item.name}</h2>
                   <p style={{ fontSize: '13px', opacity: 0.8 }}>

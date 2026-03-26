@@ -84,7 +84,6 @@ public class SafPlugin extends Plugin {
         }
 
         Uri uri = Uri.parse(uriString);
-
         DocumentFile dir = DocumentFile.fromTreeUri(getContext(), uri);
 
         if (dir == null || !dir.isDirectory()) {
@@ -115,5 +114,31 @@ public class SafPlugin extends Plugin {
         result.put("files", filesArray);
 
         call.resolve(result);
+    }
+
+    @PluginMethod
+    public void openFile(PluginCall call) {
+        String uriString = call.getString("uri");
+        String mimeType = call.getString("mimeType", "*/*");
+
+        if (uriString == null) {
+            call.reject("URI requerido");
+            return;
+        }
+
+        try {
+            Uri uri = Uri.parse(uriString);
+
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setDataAndType(uri, mimeType);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+            getContext().startActivity(intent);
+
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("No se pudo abrir el archivo: " + e.getMessage());
+        }
     }
 }
