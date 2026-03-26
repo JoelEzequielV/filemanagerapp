@@ -7,6 +7,5 @@ export const pickDirectory = async () => {
 };
 
 export const listFiles = async (uri: string) => {
-  const result = await Saf.listFiles({ uri });
-  return result.files;
+  return await Saf.listFiles({ uri });
 };

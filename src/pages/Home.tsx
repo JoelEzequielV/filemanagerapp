@@ -1,135 +1,165 @@
 import {
   IonPage,
-  IonContent,
   IonHeader,
-  IonTitle,
   IonToolbar,
+  IonTitle,
+  IonContent,
   IonButton,
-  IonSpinner,
-  IonText
-} from "@ionic/react";
+  IonList,
+  IonItem,
+  IonLabel,
+  IonText,
+  IonIcon,
+  IonSpinner
+} from '@ionic/react';
 
-import { useEffect, useState } from "react";
-import { readDirectory, FileItem } from "../services/fileService";
-import { requestStoragePermissions } from "../services/permissionService";
-import { pickDirectory, listFiles } from "../services/safService";
+import {
+  folderOutline,
+  documentOutline,
+  arrowBackOutline,
+  folderOpenOutline
+} from 'ionicons/icons';
 
+import { useState } from 'react';
+import { pickDirectory, listFiles } from '../services/safService';
+import type { FileItem, FolderResponse } from '../types/file';
 
 const Home: React.FC = () => {
   const [files, setFiles] = useState<FileItem[]>([]);
-  const [path, setPath] = useState("");
-  const [uri, setUri] = useState<string | null>(null);
+  const [currentUri, setCurrentUri] = useState<string | null>(null);
+  const [currentName, setCurrentName] = useState<string>('root');
+  const [history, setHistory] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
 
-  const load = async (p: string) => {
+  const loadFolder = async (uri: string, pushHistory = true) => {
     try {
       setLoading(true);
-      setError("");
 
-      const data = await readDirectory(p);
+      const result: FolderResponse = await listFiles(uri);
 
-      setFiles(data);
-      setPath(p);
-    } catch (err) {
-      console.error(err);
-      setError("Error cargando archivos");
+      if (pushHistory && currentUri) {
+        setHistory((prev) => [...prev, currentUri]);
+      }
+
+      setFiles(result.files);
+      setCurrentUri(result.currentUri);
+      setCurrentName(result.currentName || 'Carpeta');
+    } catch (error) {
+      console.error('Error cargando carpeta:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    const init = async () => {
+  const handlePickDirectory = async () => {
+    try {
       setLoading(true);
+      const result = await pickDirectory();
 
-      const granted = await requestStoragePermissions();
-
-      if (!granted) {
-        setError("Permiso de almacenamiento requerido");
-        setLoading(false);
-        return;
-      }
-
-      await load("");
-    };
-
-    init();
-  }, []);
-
-  const openFolder = (p: string) => {
-    load(p);
+      setHistory([]);
+      await loadFolder(result.uri, false);
+    } catch (error) {
+      console.error('Error SAF:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const goBack = () => {
-    const parts = path.split("/");
-    parts.pop();
-    const newPath = parts.join("/");
-    load(newPath);
+  const goBack = async () => {
+    if (history.length === 0) return;
+
+    const previousUri = history[history.length - 1];
+    const newHistory = history.slice(0, -1);
+
+    try {
+      setLoading(true);
+
+      const result: FolderResponse = await listFiles(previousUri);
+
+      setFiles(result.files);
+      setCurrentUri(result.currentUri);
+      setCurrentName(result.currentName || 'Carpeta');
+      setHistory(newHistory);
+    } catch (error) {
+      console.error('Error volviendo atrás:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOpenItem = async (item: FileItem) => {
+    if (item.type === 'directory') {
+      await loadFolder(item.uri, true);
+    } else {
+      console.log('Archivo seleccionado:', item);
+      // después acá vamos a abrir archivos reales
+    }
   };
 
   return (
     <IonPage>
       <IonHeader>
         <IonToolbar>
-          <IonTitle>File Manager</IonTitle>
+          <IonTitle>File Manager Pro</IonTitle>
         </IonToolbar>
       </IonHeader>
 
       <IonContent className="ion-padding">
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
+          <IonButton onClick={handlePickDirectory}>
+            Elegir carpeta real
+          </IonButton>
 
-      <IonButton onClick={async () => {
-        const result = await pickDirectory();
-        setUri(result.uri);
+          <IonButton
+            color="medium"
+            fill="outline"
+            onClick={goBack}
+            disabled={history.length === 0 || loading}
+          >
+            <IonIcon icon={arrowBackOutline} slot="start" />
+            Volver
+          </IonButton>
+        </div>
 
-        const files = await listFiles(result.uri);
-        setFiles(files);
-      }}>
-        Elegir carpeta real
-      </IonButton>
-        
-        <IonButton onClick={goBack}>Volver</IonButton>
+        <IonText color="medium">
+          <p><strong>Ruta actual:</strong> {currentName}</p>
+        </IonText>
 
-        {/* ⏳ LOADING */}
         {loading && (
-          <div style={{ textAlign: "center", marginTop: 20 }}>
-            <IonSpinner />
-            <p>Cargando archivos...</p>
+          <div style={{ textAlign: 'center', marginTop: '30px' }}>
+            <IonSpinner name="crescent" />
+            <p>Cargando...</p>
           </div>
         )}
 
-        {/* ❌ ERROR */}
-        {error && (
-          <IonText color="danger">
-            <p style={{ textAlign: "center" }}>{error}</p>
-          </IonText>
-        )}
-        <p><strong>Ruta:</strong> {path || "Root"}</p>
-        {/* 📂 LISTA */}
-        {!loading && !error && (
-          <>
-            {files.length === 0 ? (
-              <p>No hay archivos</p>
-            ) : (
-              files.map((f, i) => (
-                <div
-                  key={i}
-                  style={{
-                    padding: "10px",
-                    borderBottom: "1px solid #ccc",
-                    cursor: "pointer"
-                  }}
-                  onClick={() =>
-                    f.type === "directory" && openFolder(f.path)
-                  }
-                >
-                  {f.type === "directory" ? "📁" : "📄"} {f.name}
-                </div>
-              ))
-            )}
-          </>
+        {!loading && files.length === 0 && (
+          <div style={{ textAlign: 'center', marginTop: '40px' }}>
+            <IonIcon icon={folderOpenOutline} style={{ fontSize: '64px', opacity: 0.5 }} />
+            <p>No hay archivos</p>
+          </div>
         )}
 
+        {!loading && files.length > 0 && (
+          <IonList>
+            {files.map((item, index) => (
+              <IonItem
+                key={index}
+                button
+                detail
+                onClick={() => handleOpenItem(item)}
+              >
+                <IonIcon
+                  icon={item.type === 'directory' ? folderOutline : documentOutline}
+                  slot="start"
+                />
+                <IonLabel>
+                  <h2>{item.name}</h2>
+                  <p>{item.type === 'directory' ? 'Carpeta' : 'Archivo'}</p>
+                </IonLabel>
+              </IonItem>
+            ))}
+          </IonList>
+        )}
       </IonContent>
     </IonPage>
   );
