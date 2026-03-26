@@ -10,7 +10,8 @@ import {
   IonLabel,
   IonText,
   IonIcon,
-  IonSpinner
+  IonSpinner,
+  IonSearchbar
 } from '@ionic/react';
 
 import {
@@ -32,6 +33,8 @@ import type { FileItem, FolderResponse } from '../types/file';
 
 const Home: React.FC = () => {
   const [files, setFiles] = useState<FileItem[]>([]);
+  const [search, setSearch] = useState('');
+  const [allFiles, setAllFiles] = useState<FileItem[]>([]);
   const [currentUri, setCurrentUri] = useState<string | null>(null);
   const [currentName, setCurrentName] = useState<string>('root');
   const [history, setHistory] = useState<string[]>([]);
@@ -47,12 +50,11 @@ const Home: React.FC = () => {
         setHistory((prev) => [...prev, currentUri]);
       }
 
-      const sortedFiles = [...result.files].sort((a, b) => {
-        if (a.type === 'directory' && b.type !== 'directory') return -1;
-        if (a.type !== 'directory' && b.type === 'directory') return 1;
-      
-        return a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
-      });
+      const sortedFiles = sortFiles(result.files);
+
+      setAllFiles(sortedFiles);
+      setFiles(sortedFiles);
+      setSearch('');
       
       setFiles(sortedFiles);
       setCurrentUri(result.currentUri);
@@ -89,12 +91,11 @@ const Home: React.FC = () => {
 
       const result: FolderResponse = await listFiles(previousUri);
 
-      const sortedFiles = [...result.files].sort((a, b) => {
-        if (a.type === 'directory' && b.type !== 'directory') return -1;
-        if (a.type !== 'directory' && b.type === 'directory') return 1;
-      
-        return a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
-      });
+      const sortedFiles = sortFiles(result.files);
+
+      setAllFiles(sortedFiles);
+      setFiles(sortedFiles);
+      setSearch('');
       
       setFiles(sortedFiles);
       setCurrentUri(result.currentUri);
@@ -135,6 +136,33 @@ const Home: React.FC = () => {
   
     return documentOutline;
   };
+  /* CENTRALIZAR ORDENAMIENTO */
+  const sortFiles = (items: FileItem[]) => {
+    return [...items].sort((a, b) => {
+      if (a.type === 'directory' && b.type !== 'directory') return -1;
+      if (a.type !== 'directory' && b.type === 'directory') return 1;
+  
+      return a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
+    });
+  };
+
+  /* AGREGAR LA FUNCIÓN DE FILTRADO */
+  const handleSearch = (value: string) => {
+    setSearch(value);
+  
+    const term = value.trim().toLowerCase();
+  
+    if (!term) {
+      setFiles(allFiles);
+      return;
+    }
+  
+    const filtered = allFiles.filter((item) =>
+      item.name.toLowerCase().includes(term)
+    );
+  
+    setFiles(filtered);
+  };
 
   return (
     <IonPage>
@@ -166,9 +194,17 @@ const Home: React.FC = () => {
             <strong>Carpeta actual:</strong> {currentName}
           </p>
           <p style={{ fontSize: '13px', opacity: 0.8 }}>
-            {files.length} elemento(s)
+            {files.length} de {allFiles.length} elemento(s)
           </p>
         </IonText>
+
+        <IonSearchbar
+          value={search}
+          onIonInput={(e) => handleSearch(e.detail.value!)}
+          placeholder="Buscar archivos o carpetas..."
+          debounce={250}
+          style={{ marginTop: '10px', marginBottom: '14px' }}
+        />
 
         {loading && (
           <div style={{ textAlign: 'center', marginTop: '30px' }}>
@@ -180,7 +216,7 @@ const Home: React.FC = () => {
         {!loading && files.length === 0 && (
           <div style={{ textAlign: 'center', marginTop: '40px' }}>
             <IonIcon icon={folderOpenOutline} style={{ fontSize: '64px', opacity: 0.5 }} />
-            <p>No hay archivos</p>
+            <p>{search ? 'No se encontraron resultados' : 'No hay archivos'}</p>
           </div>
         )}
 

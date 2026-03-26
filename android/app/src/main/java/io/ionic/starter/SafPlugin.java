@@ -36,12 +36,11 @@ public class SafPlugin extends Plugin {
             Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
         );
 
-        // IMPORTANTE: el nombre debe coincidir con el método @ActivityCallback
         startActivityForResult(call, intent, "pickDirectoryResult");
     }
 
     @ActivityCallback
-    private void pickDirectoryResult(PluginCall call, ActivityResult result) {
+    public void pickDirectoryResult(PluginCall call, ActivityResult result) {
         if (call == null) return;
 
         if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null) {
@@ -57,12 +56,11 @@ public class SafPlugin extends Plugin {
                 ret.put("uri", uri.toString());
 
                 call.resolve(ret);
-            } else {
-                call.reject("No se pudo obtener la URI");
+                return;
             }
-        } else {
-            call.reject("No se seleccionó carpeta");
         }
+
+        call.reject("No se seleccionó carpeta");
     }
 
     @PluginMethod
