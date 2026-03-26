@@ -11,7 +11,11 @@ import {
   IonText,
   IonIcon,
   IonSpinner,
-  IonSearchbar
+  IonSearchbar,
+  IonSelect,
+  IonSelectOption,
+  IonSegment,
+  IonSegmentButton,
 } from '@ionic/react';
 
 import {
@@ -27,7 +31,7 @@ import {
 } from 'ionicons/icons';
 
 import { formatBytes, formatDate } from '../utils/fileFormat';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { pickDirectory, listFiles } from '../services/safService';
 import type { FileItem, FolderResponse } from '../types/file';
 
@@ -39,6 +43,8 @@ const Home: React.FC = () => {
   const [currentName, setCurrentName] = useState<string>('root');
   const [history, setHistory] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [sortBy, setSortBy] = useState<'name' | 'date' | 'size'>('name');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   const loadFolder = async (uri: string, pushHistory = true) => {
     try {
@@ -50,13 +56,13 @@ const Home: React.FC = () => {
         setHistory((prev) => [...prev, currentUri]);
       }
 
-      const sortedFiles = sortFiles(result.files);
+      const baseFiles = [...result.files];
 
-      setAllFiles(sortedFiles);
-      setFiles(sortedFiles);
+      setAllFiles(baseFiles);
       setSearch('');
+      setFiles(sortFiles(baseFiles, sortBy, sortOrder));
       
-      setFiles(sortedFiles);
+   
       setCurrentUri(result.currentUri);
       setCurrentName(result.currentName || 'Carpeta');
     } catch (error) {
@@ -91,13 +97,13 @@ const Home: React.FC = () => {
 
       const result: FolderResponse = await listFiles(previousUri);
 
-      const sortedFiles = sortFiles(result.files);
+      const baseFiles = [...result.files];
 
-      setAllFiles(sortedFiles);
-      setFiles(sortedFiles);
+      setAllFiles(baseFiles);
       setSearch('');
+      setFiles(sortFiles(baseFiles, sortBy, sortOrder));
       
-      setFiles(sortedFiles);
+     
       setCurrentUri(result.currentUri);
       setCurrentName(result.currentName || 'Carpeta');
       setHistory(newHistory);
@@ -137,32 +143,58 @@ const Home: React.FC = () => {
     return documentOutline;
   };
   /* CENTRALIZAR ORDENAMIENTO */
-  const sortFiles = (items: FileItem[]) => {
+  const sortFiles = (
+    items: FileItem[],
+    criteria: 'name' | 'date' | 'size' = sortBy,
+    order: 'asc' | 'desc' = sortOrder
+  ) => {
     return [...items].sort((a, b) => {
+      // Siempre carpetas primero
       if (a.type === 'directory' && b.type !== 'directory') return -1;
       if (a.type !== 'directory' && b.type === 'directory') return 1;
   
-      return a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
+      let comparison = 0;
+  
+      if (criteria === 'name') {
+        comparison = a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
+      }
+  
+      if (criteria === 'date') {
+        comparison = a.lastModified - b.lastModified;
+      }
+  
+      if (criteria === 'size') {
+        comparison = a.size - b.size;
+      }
+  
+      return order === 'asc' ? comparison : -comparison;
     });
   };
 
   /* AGREGAR LA FUNCIÓN DE FILTRADO */
   const handleSearch = (value: string) => {
     setSearch(value);
+    setFiles(applyFiltersAndSort(allFiles, value));
+  };
+
+  /* REAPLICAR ORDEN CUANDO CAMBIA FILTRO */
+  const applyFiltersAndSort = (items: FileItem[], term: string = search) => {
+    let filtered = [...items];
   
-    const term = value.trim().toLowerCase();
+    const searchTerm = term.trim().toLowerCase();
   
-    if (!term) {
-      setFiles(allFiles);
-      return;
+    if (searchTerm) {
+      filtered = filtered.filter((item) =>
+        item.name.toLowerCase().includes(searchTerm)
+      );
     }
   
-    const filtered = allFiles.filter((item) =>
-      item.name.toLowerCase().includes(term)
-    );
-  
-    setFiles(filtered);
+    return sortFiles(filtered, sortBy, sortOrder);
   };
+
+  useEffect(() => {
+    setFiles(applyFiltersAndSort(allFiles, search));
+  }, [sortBy, sortOrder]);
 
   return (
     <IonPage>
@@ -205,7 +237,32 @@ const Home: React.FC = () => {
           debounce={250}
           style={{ marginTop: '10px', marginBottom: '14px' }}
         />
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
+        <IonSelect
+          value={sortBy}
+          placeholder="Ordenar por"
+          onIonChange={(e) => setSortBy(e.detail.value)}
+          interface="popover"
+          style={{ minWidth: '160px' }}
+        >
+          <IonSelectOption value="name">Nombre</IonSelectOption>
+          <IonSelectOption value="date">Fecha</IonSelectOption>
+          <IonSelectOption value="size">Tamaño</IonSelectOption>
+        </IonSelect>
 
+        <IonSegment
+          value={sortOrder}
+          onIonChange={(e) => setSortOrder(e.detail.value)}
+          style={{ flex: 1, minWidth: '180px' }}
+        >
+          <IonSegmentButton value="asc">
+            <IonLabel>Asc</IonLabel>
+          </IonSegmentButton>
+          <IonSegmentButton value="desc">
+            <IonLabel>Desc</IonLabel>
+          </IonSegmentButton>
+        </IonSegment>
+      </div>
         {loading && (
           <div style={{ textAlign: 'center', marginTop: '30px' }}>
             <IonSpinner name="crescent" />
