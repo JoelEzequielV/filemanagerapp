@@ -16,6 +16,8 @@ import {
   IonSelectOption,
   IonSegment,
   IonSegmentButton,
+  IonButtons,
+  IonActionSheet,
 } from '@ionic/react';
 
 import {
@@ -27,7 +29,12 @@ import {
   videocamOutline,
   musicalNotesOutline,
   codeSlashOutline,
-  documentTextOutline
+  documentTextOutline,
+  ellipsisVertical,
+  openOutline,
+  informationCircleOutline,
+  copyOutline,
+  closeOutline
 } from 'ionicons/icons';
 
 import { formatBytes, formatDate } from '../utils/fileFormat';
@@ -40,12 +47,21 @@ const Home: React.FC = () => {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [allFiles, setAllFiles] = useState<FileItem[]>([]);
   const [search, setSearch] = useState('');
+
   const [currentUri, setCurrentUri] = useState<string | null>(null);
-  const [currentName, setCurrentName] = useState<string>('root');
+  const [currentName, setCurrentName] = useState<string>('Sin carpeta seleccionada');
   const [history, setHistory] = useState<string[]>([]);
+
   const [loading, setLoading] = useState(false);
   const [sortBy, setSortBy] = useState<'name' | 'date' | 'size'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+
+  const [selectedItem, setSelectedItem] = useState<FileItem | null>(null);
+  const [showActionSheet, setShowActionSheet] = useState(false);
+
+  useEffect(() => {
+    console.log('Plugins disponibles:', (window as any).Capacitor?.Plugins);
+  }, []);
 
   const sortFiles = (
     items: FileItem[],
@@ -53,7 +69,7 @@ const Home: React.FC = () => {
     order: 'asc' | 'desc' = sortOrder
   ) => {
     return [...items].sort((a, b) => {
-      // Carpetas siempre primero
+      // Carpetas siempre arriba
       if (a.type === 'directory' && b.type !== 'directory') return -1;
       if (a.type !== 'directory' && b.type === 'directory') return 1;
 
@@ -81,7 +97,7 @@ const Home: React.FC = () => {
 
     if (searchTerm) {
       filtered = filtered.filter((item) =>
-        item.name.toLowerCase().includes(searchTerm)
+        item.name?.toLowerCase().includes(searchTerm)
       );
     }
 
@@ -93,26 +109,32 @@ const Home: React.FC = () => {
     setFiles(applyFiltersAndSort(allFiles, value));
   };
 
+  const applyFolderToState = (result: FolderResponse) => {
+    const baseFiles = [...result.files];
+
+    setAllFiles(baseFiles);
+    setSearch('');
+    setFiles(sortFiles(baseFiles, sortBy, sortOrder));
+    setCurrentUri(result.currentUri);
+    setCurrentName(result.currentName || 'Carpeta');
+  };
+
   const loadFolder = async (uri: string, pushHistory = true) => {
     try {
+      console.log('📂 loadFolder() =>', uri);
       setLoading(true);
 
       const result: FolderResponse = await listFiles(uri);
+      console.log('📂 Resultado listFiles():', result);
 
-      if (pushHistory && currentUri) {
+      if (pushHistory && currentUri && currentUri !== uri) {
         setHistory((prev) => [...prev, currentUri]);
       }
 
-      const baseFiles = [...result.files];
-
-      setAllFiles(baseFiles);
-      setSearch('');
-      setFiles(sortFiles(baseFiles, sortBy, sortOrder));
-      setCurrentUri(result.currentUri);
-      setCurrentName(result.currentName || 'Carpeta');
-    } catch (error) {
-      console.error('Error cargando carpeta:', error);
-      alert('No se pudo cargar la carpeta');
+      applyFolderToState(result);
+    } catch (error: any) {
+      console.error('❌ Error cargando carpeta:', error);
+      alert(error?.message || 'No se pudo cargar la carpeta');
     } finally {
       setLoading(false);
     }
@@ -120,14 +142,26 @@ const Home: React.FC = () => {
 
   const handlePickDirectory = async () => {
     try {
+      console.log('📁 Iniciando selección de carpeta...');
       setLoading(true);
-      const result = await pickDirectory();
 
+      const result = await pickDirectory();
+      console.log('✅ Carpeta seleccionada:', result);
+
+      if (!result?.uri) {
+        throw new Error('No se recibió URI de carpeta');
+      }
+
+      const folder = await listFiles(result.uri);
+      console.log('📂 Resultado listFiles:', folder);
+
+      applyFolderToState(folder);
+
+      // al elegir carpeta raíz, reiniciamos historial
       setHistory([]);
-      await loadFolder(result.uri, false);
-    } catch (error) {
-      console.error('Error SAF:', error);
-      alert('No se pudo seleccionar la carpeta');
+    } catch (error: any) {
+      console.error('❌ Error al seleccionar carpeta:', error);
+      alert(error?.message || 'No se pudo abrir la carpeta');
     } finally {
       setLoading(false);
     }
@@ -140,20 +174,17 @@ const Home: React.FC = () => {
     const newHistory = history.slice(0, -1);
 
     try {
+      console.log('⬅️ Volviendo a:', previousUri);
       setLoading(true);
 
       const result: FolderResponse = await listFiles(previousUri);
-      const baseFiles = [...result.files];
+      console.log('📂 Resultado volver atrás:', result);
 
-      setAllFiles(baseFiles);
-      setSearch('');
-      setFiles(sortFiles(baseFiles, sortBy, sortOrder));
-      setCurrentUri(result.currentUri);
-      setCurrentName(result.currentName || 'Carpeta');
+      applyFolderToState(result);
       setHistory(newHistory);
-    } catch (error) {
-      console.error('Error volviendo atrás:', error);
-      alert('No se pudo volver a la carpeta anterior');
+    } catch (error: any) {
+      console.error('❌ Error volviendo atrás:', error);
+      alert(error?.message || 'No se pudo volver a la carpeta anterior');
     } finally {
       setLoading(false);
     }
@@ -166,13 +197,40 @@ const Home: React.FC = () => {
         return;
       }
 
-      const mimeType = getMimeType(item.name);
+      const mimeType = item.mimeType || getMimeType(item.name);
+      console.log('📄 Abriendo archivo:', item.name, mimeType);
 
       await openFile(item.uri, mimeType);
-    } catch (error) {
-      console.error('Error al abrir elemento:', error);
-      alert('No se pudo abrir este archivo en el dispositivo');
+    } catch (error: any) {
+      console.error('❌ Error al abrir elemento:', error);
+      alert(error?.message || 'No se pudo abrir este archivo en el dispositivo');
     }
+  };
+
+  const handleShowOptions = (item: FileItem) => {
+    setSelectedItem(item);
+    setShowActionSheet(true);
+  };
+
+  const handleCopyText = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      alert(`${label} copiado`);
+    } catch (error) {
+      console.error('Error copiando:', error);
+      alert(`No se pudo copiar ${label.toLowerCase()}`);
+    }
+  };
+
+  const handleShowDetails = (item: FileItem) => {
+    alert(
+      `Nombre: ${item.name}\n` +
+      `Tipo: ${item.type === 'directory' ? 'Carpeta' : 'Archivo'}\n` +
+      `Tamaño: ${item.type === 'directory' ? '-' : formatBytes(item.size)}\n` +
+      `Fecha: ${formatDate(item.lastModified)}\n` +
+      `URI: ${item.uri}\n` +
+      `MIME: ${item.mimeType || getMimeType(item.name)}`
+    );
   };
 
   const getFileIcon = (item: FileItem) => {
@@ -183,16 +241,17 @@ const Home: React.FC = () => {
     if (!ext) return documentOutline;
 
     if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) return imageOutline;
-    if (['mp4', 'mkv', 'avi', 'mov'].includes(ext)) return videocamOutline;
-    if (['mp3', 'wav', 'ogg', 'flac'].includes(ext)) return musicalNotesOutline;
-    if (['js', 'ts', 'tsx', 'jsx', 'json', 'html', 'css', 'java', 'kt', 'xml'].includes(ext)) return codeSlashOutline;
-    if (['txt', 'pdf', 'doc', 'docx'].includes(ext)) return documentTextOutline;
+    if (['mp4', 'mkv', 'avi', 'mov', 'webm'].includes(ext)) return videocamOutline;
+    if (['mp3', 'wav', 'ogg', 'flac', 'm4a'].includes(ext)) return musicalNotesOutline;
+    if (['js', 'ts', 'tsx', 'jsx', 'json', 'html', 'css', 'java', 'kt', 'xml', 'php', 'sql'].includes(ext)) return codeSlashOutline;
+    if (['txt', 'pdf', 'doc', 'docx', 'odt', 'rtf'].includes(ext)) return documentTextOutline;
 
     return documentOutline;
   };
 
   useEffect(() => {
     setFiles(applyFiltersAndSort(allFiles, search));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortBy, sortOrder]);
 
   return (
@@ -284,7 +343,7 @@ const Home: React.FC = () => {
               <IonItem
                 key={`${item.uri}-${index}`}
                 button
-                detail
+                detail={false}
                 onClick={() => handleOpenItem(item)}
               >
                 <IonIcon
@@ -301,10 +360,71 @@ const Home: React.FC = () => {
                       : `${formatBytes(item.size)} • ${formatDate(item.lastModified)}`}
                   </p>
                 </IonLabel>
+
+                <IonButtons slot="end">
+                  <IonButton
+                    fill="clear"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleShowOptions(item);
+                    }}
+                  >
+                    <IonIcon icon={ellipsisVertical} />
+                  </IonButton>
+                </IonButtons>
               </IonItem>
             ))}
           </IonList>
         )}
+
+        <IonActionSheet
+          isOpen={showActionSheet}
+          onDidDismiss={() => setShowActionSheet(false)}
+          header={selectedItem?.name || 'Opciones'}
+          buttons={[
+            {
+              text: 'Abrir',
+              icon: openOutline,
+              handler: async () => {
+                if (selectedItem) {
+                  await handleOpenItem(selectedItem);
+                }
+              }
+            },
+            {
+              text: 'Ver detalles',
+              icon: informationCircleOutline,
+              handler: () => {
+                if (selectedItem) {
+                  handleShowDetails(selectedItem);
+                }
+              }
+            },
+            {
+              text: 'Copiar nombre',
+              icon: copyOutline,
+              handler: async () => {
+                if (selectedItem) {
+                  await handleCopyText(selectedItem.name, 'Nombre');
+                }
+              }
+            },
+            {
+              text: 'Copiar URI',
+              icon: copyOutline,
+              handler: async () => {
+                if (selectedItem) {
+                  await handleCopyText(selectedItem.uri, 'URI');
+                }
+              }
+            },
+            {
+              text: 'Cancelar',
+              role: 'cancel',
+              icon: closeOutline
+            }
+          ]}
+        />
       </IonContent>
     </IonPage>
   );

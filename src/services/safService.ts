@@ -1,15 +1,20 @@
 import { registerPlugin } from '@capacitor/core';
-import type { FileItem, FolderResponse } from '../types/file';
+import type { FolderResponse } from '../types/file';
+
+interface PickDirectoryResponse {
+  uri: string;
+  persisted?: boolean;
+}
 
 interface SafPlugin {
-  pickDirectory(): Promise<{ uri: string }>;
+  pickDirectory(): Promise<PickDirectoryResponse>;
   listFiles(options: { uri: string }): Promise<FolderResponse>;
   openFile(options: { uri: string; mimeType: string }): Promise<void>;
 }
 
 const Saf = registerPlugin<SafPlugin>('Saf');
 
-export const pickDirectory = async () => {
+export const pickDirectory = async (): Promise<PickDirectoryResponse> => {
   return await Saf.pickDirectory();
 };
 
