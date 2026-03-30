@@ -20,6 +20,7 @@ type GenericResult = {
   uri?: string;
   name?: string;
   newName?: string;
+  fallbackUsed?: boolean;
 };
 
 interface SafPlugin {
@@ -29,7 +30,7 @@ interface SafPlugin {
   readTextFile(options: { uri: string }): Promise<ReadTextResult>;
   getFileBase64(options: { uri: string; mimeType: string }): Promise<Base64Result>;
   createFolder(options: { parentUri: string; folderName: string }): Promise<GenericResult>;
-  renameItem(options: { uri: string; newName: string }): Promise<GenericResult>;
+  renameItem(options: { uri: string; newName: string; parentUri?: string }): Promise<GenericResult>;
   deleteItem(options: { uri: string }): Promise<GenericResult>;
 }
 
@@ -44,8 +45,8 @@ export const getFileBase64 = async (uri: string, mimeType: string) => await Saf.
 export const createFolder = async (parentUri: string, folderName: string) =>
   await Saf.createFolder({ parentUri, folderName });
 
-export const renameItem = async (uri: string, newName: string) =>
-  await Saf.renameItem({ uri, newName });
+export const renameItem = async (uri: string, newName: string, parentUri?: string) =>
+  await Saf.renameItem({ uri, newName, parentUri });
 
 export const deleteItem = async (uri: string) =>
   await Saf.deleteItem({ uri });

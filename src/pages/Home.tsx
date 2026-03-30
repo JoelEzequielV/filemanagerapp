@@ -305,10 +305,23 @@ const Home: React.FC = () => {
       if (!selectedItem) return;
       const cleanName = newName.trim();
       if (!cleanName) return;
-
+  
       setLoading(true);
-      await renameItem(selectedItem.uri, cleanName);
-      await refreshCurrentFolder();
+  
+      const result = await renameItem(
+        selectedItem.uri,
+        cleanName,
+        currentUri || undefined
+      );
+  
+      const wasCurrentFolder = currentUri === selectedItem.uri;
+      const newUri = result?.uri || selectedItem.uri;
+  
+      if (wasCurrentFolder && selectedItem.type === 'directory') {
+        await loadFolder(newUri, false, true);
+      } else {
+        await refreshCurrentFolder();
+      }
     } catch (error: any) {
       console.error('❌ Error renombrando:', error);
       alert(error?.message || 'No se pudo renombrar');

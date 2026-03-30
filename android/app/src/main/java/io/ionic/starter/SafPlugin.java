@@ -227,40 +227,111 @@ public class SafPlugin extends Plugin {
     public void renameItem(PluginCall call) {
         String uriString = call.getString("uri");
         String newName = call.getString("newName");
-
+        String parentUriString = call.getString("parentUri");
+    
         if (uriString == null || uriString.trim().isEmpty()) {
             call.reject("URI requerida");
             return;
         }
-
+    
         if (newName == null || newName.trim().isEmpty()) {
             call.reject("Nuevo nombre requerido");
             return;
         }
-
+    
         try {
-            DocumentFile file = DocumentFile.fromSingleUri(getContext(), Uri.parse(uriString));
-
-            if (file == null || !file.exists()) {
+            Uri uri = Uri.parse(uriString);
+            DocumentFile file = resolveDocumentFile(uri);
+    
+            if (file == null) {
+                call.reject("No se pudo resolver el elemento");
+                return;
+            }
+    
+            if (!file.exists()) {
                 call.reject("El elemento no existe");
                 return;
             }
+    
+            boolean isDirectory = file.isDirectory();
+    
+            // Intento normal primero
+            try {
+                boolean renamed = file.renameTo(newName);
+    
+                if (renamed) {
+                    JSObject result = new JSObject();
+                    result.put("success", true);
+                    result.put("newName", newName);
+                    result.put("uri", file.getUri().toString());
+                    result.put("fallbackUsed", false);
+                    call.resolve(result);
+                    return;
+                }
+            } catch (UnsupportedOperationException unsupported) {
+                Log.w(TAG, "renameTo no soportado, usando fallback...");
+            } catch (Exception renameError) {
+                Log.w(TAG, "renameTo falló, usando fallback: " + renameError.getMessage());
+            }
 
-            boolean renamed = file.renameTo(newName);
+            // Fallback SOLO para carpetas
+            if (isDirectory) {
+                if (parentUriString == null || parentUriString.trim().isEmpty()) {
+                    call.reject("parentUri requerido para renombrar carpetas");
+                    return;
+                }
 
-            if (!renamed) {
-                call.reject("No se pudo renombrar el elemento");
+                DocumentFile parent = DocumentFile.fromTreeUri(getContext(), Uri.parse(parentUriString));
+
+                if (parent == null || !parent.exists() || !parent.isDirectory()) {
+                    call.reject("No se pudo acceder a la carpeta padre");
+                    return;
+                }
+
+                // 🔥 importante: resolver la carpeta como árbol navegable
+                DocumentFile sourceDir = resolveDirectoryForTraversal(uri);
+
+                if (sourceDir == null || !sourceDir.exists() || !sourceDir.isDirectory()) {
+                    call.reject("No se pudo abrir la carpeta origen para copiar su contenido");
+                    return;
+                }
+
+                DocumentFile existing = parent.findFile(newName);
+                if (existing != null) {
+                    call.reject("Ya existe un elemento con ese nombre");
+                    return;
+                }
+
+                DocumentFile newFolder = parent.createDirectory(newName);
+
+                if (newFolder == null) {
+                    call.reject("No se pudo crear la nueva carpeta para el renombrado");
+                    return;
+                }
+
+                copyDirectoryContents(sourceDir, newFolder);
+
+                boolean deletedOld = sourceDir.delete();
+                if (!deletedOld) {
+                    Log.w(TAG, "La carpeta original no pudo eliminarse después del fallback");
+                }
+
+                JSObject result = new JSObject();
+                result.put("success", true);
+                result.put("newName", newName);
+                result.put("uri", newFolder.getUri().toString());
+                result.put("fallbackUsed", true);
+
+                call.resolve(result);
                 return;
             }
 
-            JSObject result = new JSObject();
-            result.put("success", true);
-            result.put("newName", newName);
-
-            call.resolve(result);
+    
+            call.reject("Android no soporta renombrar este archivo/carpeta");
+    
         } catch (Exception e) {
             Log.e(TAG, "Error renombrando: " + e.getMessage(), e);
-            call.reject("No se pudo renombrar: " + e.getMessage());
+            call.reject("No se pudo renombrar: " + safeMessage(e));
         }
     }
 
@@ -274,9 +345,15 @@ public class SafPlugin extends Plugin {
         }
 
         try {
-            DocumentFile file = DocumentFile.fromSingleUri(getContext(), Uri.parse(uriString));
+            Uri uri = Uri.parse(uriString);
+            DocumentFile file = resolveDocumentFile(uri);
 
-            if (file == null || !file.exists()) {
+            if (file == null) {
+                call.reject("No se pudo resolver el elemento");
+                return;
+            }
+
+            if (!file.exists()) {
                 call.reject("El elemento no existe");
                 return;
             }
@@ -284,7 +361,7 @@ public class SafPlugin extends Plugin {
             boolean deleted = file.delete();
 
             if (!deleted) {
-                call.reject("No se pudo eliminar el elemento");
+                call.reject("Android rechazó la eliminación de este elemento");
                 return;
             }
 
@@ -292,9 +369,10 @@ public class SafPlugin extends Plugin {
             result.put("success", true);
 
             call.resolve(result);
+
         } catch (Exception e) {
             Log.e(TAG, "Error eliminando: " + e.getMessage(), e);
-            call.reject("No se pudo eliminar: " + e.getMessage());
+            call.reject("No se pudo eliminar: " + safeMessage(e));
         }
     }
 
@@ -439,4 +517,133 @@ public class SafPlugin extends Plugin {
 
         return "*/*";
     }
+
+    private DocumentFile resolveDocumentFile(Uri uri) {
+        try {
+            DocumentFile single = DocumentFile.fromSingleUri(getContext(), uri);
+            if (single != null) return single;
+        } catch (Exception e) {
+            Log.w(TAG, "fromSingleUri falló: " + e.getMessage());
+        }
+    
+        try {
+            DocumentFile tree = DocumentFile.fromTreeUri(getContext(), uri);
+            if (tree != null) return tree;
+        } catch (Exception e) {
+            Log.w(TAG, "fromTreeUri falló: " + e.getMessage());
+        }
+    
+        return null;
+    }
+    
+    private String safeMessage(Exception e) {
+        if (e == null) return "Error desconocido";
+        if (e.getMessage() == null || e.getMessage().trim().isEmpty()) {
+            return e.getClass().getSimpleName();
+        }
+        return e.getMessage();
+    }
+
+    private void copyDirectoryContents(DocumentFile sourceDir, DocumentFile targetDir) throws Exception {
+        if (sourceDir == null || targetDir == null) {
+            throw new Exception("Directorio origen o destino inválido");
+        }
+    
+        if (!sourceDir.exists() || !sourceDir.isDirectory()) {
+            throw new Exception("La carpeta origen no es válida o no existe");
+        }
+    
+        DocumentFile[] children;
+        try {
+            children = sourceDir.listFiles();
+        } catch (UnsupportedOperationException e) {
+            throw new Exception("Android no permite listar el contenido de esta carpeta");
+        }
+    
+        for (DocumentFile child : children) {
+            if (child.isDirectory()) {
+                String childName = child.getName() != null ? child.getName() : "Carpeta";
+                DocumentFile newSubDir = targetDir.createDirectory(childName);
+    
+                if (newSubDir == null) {
+                    throw new Exception("No se pudo crear subcarpeta: " + childName);
+                }
+    
+                copyDirectoryContents(child, newSubDir);
+            } else if (child.isFile()) {
+                copySingleFile(child, targetDir);
+            }
+        }
+    }
+    
+    private void copySingleFile(DocumentFile sourceFile, DocumentFile targetDir) throws Exception {
+        if (sourceFile == null || targetDir == null) {
+            throw new Exception("Archivo origen o destino inválido");
+        }
+    
+        String fileName = sourceFile.getName() != null ? sourceFile.getName() : "archivo";
+        String mimeType = sourceFile.getType();
+    
+        if (mimeType == null || mimeType.trim().isEmpty()) {
+            mimeType = "*/*";
+        }
+    
+        DocumentFile newFile = targetDir.createFile(mimeType, fileName);
+    
+        if (newFile == null) {
+            throw new Exception("No se pudo crear archivo destino: " + fileName);
+        }
+    
+        InputStream in = null;
+        java.io.OutputStream out = null;
+    
+        try {
+            in = getContext().getContentResolver().openInputStream(sourceFile.getUri());
+            out = getContext().getContentResolver().openOutputStream(newFile.getUri());
+    
+            if (in == null || out == null) {
+                throw new Exception("No se pudo abrir stream de copiado para: " + fileName);
+            }
+    
+            byte[] buffer = new byte[8192];
+            int len;
+    
+            while ((len = in.read(buffer)) > 0) {
+                out.write(buffer, 0, len);
+            }
+    
+            out.flush();
+        } finally {
+            try {
+                if (in != null) in.close();
+            } catch (Exception ignored) {}
+    
+            try {
+                if (out != null) out.close();
+            } catch (Exception ignored) {}
+        }
+    }
+
+    private DocumentFile resolveDirectoryForTraversal(Uri uri) {
+        try {
+            DocumentFile tree = DocumentFile.fromTreeUri(getContext(), uri);
+            if (tree != null && tree.exists() && tree.isDirectory()) {
+                return tree;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "resolveDirectoryForTraversal fromTreeUri falló: " + e.getMessage());
+        }
+    
+        try {
+            DocumentFile single = DocumentFile.fromSingleUri(getContext(), uri);
+            if (single != null && single.exists() && single.isDirectory()) {
+                return single;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "resolveDirectoryForTraversal fromSingleUri falló: " + e.getMessage());
+        }
+    
+        return null;
+    }
+
 }
