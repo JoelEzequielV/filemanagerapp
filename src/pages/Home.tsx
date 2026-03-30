@@ -58,7 +58,8 @@ import {
   createFolder,
   renameItem,
   deleteItem,
-  duplicateItem
+  duplicateItem,
+  copyItem
 } from '../services/safService';
 import {
   saveLastFolderUri,
@@ -84,6 +85,8 @@ const Home: React.FC = () => {
 
   const [selectedItem, setSelectedItem] = useState<FileItem | null>(null);
   const [showActionSheet, setShowActionSheet] = useState(false);
+
+  const [pendingCopyItem, setPendingCopyItem] = useState<FileItem | null>(null);
 
   const [showPreview, setShowPreview] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -361,6 +364,42 @@ const Home: React.FC = () => {
     }
   };
 
+  const handleStartCopyItem = async () => {
+    try {
+      if (!selectedItem) return;
+  
+      const itemToCopy = selectedItem;
+  
+      setPendingCopyItem(itemToCopy);
+      setShowActionSheet(false);
+  
+      setLoading(true);
+      const destination = await pickDirectory();
+  
+      if (!destination?.uri) {
+        throw new Error('No se seleccionó carpeta destino');
+      }
+  
+      await handleCopyToSelectedFolder(itemToCopy, destination.uri);
+  
+      alert(`"${itemToCopy.name}" copiado correctamente`);
+    } catch (error: any) {
+      console.error('❌ Error copiando a otra carpeta:', error);
+      alert(error?.message || 'No se pudo copiar');
+    } finally {
+      setPendingCopyItem(null);
+      setLoading(false);
+    }
+  };
+
+  const handleCopyToSelectedFolder = async (item: FileItem, destinationUri: string) => {
+    await copyItem(item.uri, destinationUri);
+  
+    if (currentUri === destinationUri) {
+      await refreshCurrentFolder();
+    }
+  };
+
   const handleShowOptions = (item: FileItem) => {
     setSelectedItem(item);
     setShowActionSheet(true);
@@ -587,6 +626,13 @@ const Home: React.FC = () => {
               icon: copyOutline,
               handler: async () => {
                 await handleDuplicateItem();
+              }
+            },
+            {
+              text: 'Copiar a...',
+              icon: copyOutline,
+              handler: async () => {
+                await handleStartCopyItem();
               }
             },
             {
