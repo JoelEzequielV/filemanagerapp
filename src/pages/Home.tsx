@@ -41,6 +41,7 @@ import { formatBytes, formatDate } from '../utils/fileFormat';
 import { getMimeType } from '../utils/mime';
 import { useEffect, useState } from 'react';
 import { pickDirectory, listFiles, openFile } from '../services/safService';
+import { saveLastFolderUri, getLastFolderUri, clearLastFolderUri } from '../services/storageService';
 import type { FileItem, FolderResponse } from '../types/file';
 
 const Home: React.FC = () => {
@@ -53,6 +54,8 @@ const Home: React.FC = () => {
   const [history, setHistory] = useState<string[]>([]);
 
   const [loading, setLoading] = useState(false);
+  const [initializing, setInitializing] = useState(true);
+
   const [sortBy, setSortBy] = useState<'name' | 'date' | 'size'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
@@ -69,7 +72,6 @@ const Home: React.FC = () => {
     order: 'asc' | 'desc' = sortOrder
   ) => {
     return [...items].sort((a, b) => {
-      // Carpetas siempre arriba
       if (a.type === 'directory' && b.type !== 'directory') return -1;
       if (a.type !== 'directory' && b.type === 'directory') return 1;
 
@@ -119,7 +121,7 @@ const Home: React.FC = () => {
     setCurrentName(result.currentName || 'Carpeta');
   };
 
-  const loadFolder = async (uri: string, pushHistory = true) => {
+  const loadFolder = async (uri: string, pushHistory = true, persist = true) => {
     try {
       console.log('📂 loadFolder() =>', uri);
       setLoading(true);
@@ -132,6 +134,10 @@ const Home: React.FC = () => {
       }
 
       applyFolderToState(result);
+
+      if (persist) {
+        await saveLastFolderUri(result.currentUri);
+      }
     } catch (error: any) {
       console.error('❌ Error cargando carpeta:', error);
       alert(error?.message || 'No se pudo cargar la carpeta');
@@ -156,9 +162,9 @@ const Home: React.FC = () => {
       console.log('📂 Resultado listFiles:', folder);
 
       applyFolderToState(folder);
-
-      // al elegir carpeta raíz, reiniciamos historial
       setHistory([]);
+
+      await saveLastFolderUri(folder.currentUri);
     } catch (error: any) {
       console.error('❌ Error al seleccionar carpeta:', error);
       alert(error?.message || 'No se pudo abrir la carpeta');
@@ -182,6 +188,8 @@ const Home: React.FC = () => {
 
       applyFolderToState(result);
       setHistory(newHistory);
+
+      await saveLastFolderUri(result.currentUri);
     } catch (error: any) {
       console.error('❌ Error volviendo atrás:', error);
       alert(error?.message || 'No se pudo volver a la carpeta anterior');
@@ -193,7 +201,7 @@ const Home: React.FC = () => {
   const handleOpenItem = async (item: FileItem) => {
     try {
       if (item.type === 'directory') {
-        await loadFolder(item.uri, true);
+        await loadFolder(item.uri, true, true);
         return;
       }
 
@@ -254,6 +262,35 @@ const Home: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortBy, sortOrder]);
 
+  useEffect(() => {
+    const restoreLastFolder = async () => {
+      try {
+        console.log('🔄 Restaurando última carpeta...');
+        const lastUri = await getLastFolderUri();
+
+        if (!lastUri) {
+          console.log('ℹ️ No hay carpeta guardada');
+          return;
+        }
+
+        console.log('📁 Última carpeta encontrada:', lastUri);
+
+        const folder = await listFiles(lastUri);
+        console.log('✅ Carpeta restaurada:', folder);
+
+        applyFolderToState(folder);
+        setHistory([]);
+      } catch (error) {
+        console.warn('⚠️ No se pudo restaurar la última carpeta:', error);
+        await clearLastFolderUri();
+      } finally {
+        setInitializing(false);
+      }
+    };
+
+    restoreLastFolder();
+  }, []);
+
   return (
     <IonPage>
       <IonHeader>
@@ -264,7 +301,7 @@ const Home: React.FC = () => {
 
       <IonContent className="ion-padding">
         <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
-          <IonButton onClick={handlePickDirectory} disabled={loading}>
+          <IonButton onClick={handlePickDirectory} disabled={loading || initializing}>
             Elegir carpeta real
           </IonButton>
 
@@ -272,7 +309,7 @@ const Home: React.FC = () => {
             color="medium"
             fill="outline"
             onClick={goBack}
-            disabled={history.length === 0 || loading}
+            disabled={history.length === 0 || loading || initializing}
           >
             <IonIcon icon={arrowBackOutline} slot="start" />
             Volver
@@ -294,6 +331,7 @@ const Home: React.FC = () => {
           placeholder="Buscar archivos o carpetas..."
           debounce={250}
           style={{ marginTop: '10px', marginBottom: '14px' }}
+          disabled={initializing}
         />
 
         <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
@@ -303,6 +341,7 @@ const Home: React.FC = () => {
             onIonChange={(e) => setSortBy(e.detail.value)}
             interface="popover"
             style={{ minWidth: '160px' }}
+            disabled={initializing}
           >
             <IonSelectOption value="name">Nombre</IonSelectOption>
             <IonSelectOption value="date">Fecha</IonSelectOption>
@@ -313,6 +352,7 @@ const Home: React.FC = () => {
             value={sortOrder}
             onIonChange={(e) => setSortOrder(e.detail.value)}
             style={{ flex: 1, minWidth: '180px' }}
+            disabled={initializing}
           >
             <IonSegmentButton value="asc">
               <IonLabel>Asc</IonLabel>
@@ -323,21 +363,21 @@ const Home: React.FC = () => {
           </IonSegment>
         </div>
 
-        {loading && (
+        {(loading || initializing) && (
           <div style={{ textAlign: 'center', marginTop: '30px' }}>
             <IonSpinner name="crescent" />
-            <p>Cargando...</p>
+            <p>{initializing ? 'Restaurando carpeta...' : 'Cargando...'}</p>
           </div>
         )}
 
-        {!loading && files.length === 0 && (
+        {!loading && !initializing && files.length === 0 && (
           <div style={{ textAlign: 'center', marginTop: '40px' }}>
             <IonIcon icon={folderOpenOutline} style={{ fontSize: '64px', opacity: 0.5 }} />
             <p>{search ? 'No se encontraron resultados' : 'No hay archivos'}</p>
           </div>
         )}
 
-        {!loading && files.length > 0 && (
+        {!loading && !initializing && files.length > 0 && (
           <IonList>
             {files.map((item, index) => (
               <IonItem
