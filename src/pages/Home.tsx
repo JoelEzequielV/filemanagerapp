@@ -18,6 +18,8 @@ import {
   IonSegmentButton,
   IonButtons,
   IonActionSheet,
+  IonModal,
+  IonTextarea,
 } from '@ionic/react';
 
 import {
@@ -34,14 +36,25 @@ import {
   openOutline,
   informationCircleOutline,
   copyOutline,
-  closeOutline
+  closeOutline,
+  eyeOutline
 } from 'ionicons/icons';
 
 import { formatBytes, formatDate } from '../utils/fileFormat';
 import { getMimeType } from '../utils/mime';
 import { useEffect, useState } from 'react';
-import { pickDirectory, listFiles, openFile } from '../services/safService';
-import { saveLastFolderUri, getLastFolderUri, clearLastFolderUri } from '../services/storageService';
+import {
+  pickDirectory,
+  listFiles,
+  openFile,
+  readTextFile,
+  getFileBase64
+} from '../services/safService';
+import {
+  saveLastFolderUri,
+  getLastFolderUri,
+  clearLastFolderUri
+} from '../services/storageService';
 import type { FileItem, FolderResponse } from '../types/file';
 
 const Home: React.FC = () => {
@@ -61,6 +74,13 @@ const Home: React.FC = () => {
 
   const [selectedItem, setSelectedItem] = useState<FileItem | null>(null);
   const [showActionSheet, setShowActionSheet] = useState(false);
+
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewType, setPreviewType] = useState<'image' | 'text' | null>(null);
+  const [previewTitle, setPreviewTitle] = useState('');
+  const [previewText, setPreviewText] = useState('');
+  const [previewImage, setPreviewImage] = useState('');
 
   useEffect(() => {
     console.log('Plugins disponibles:', (window as any).Capacitor?.Plugins);
@@ -113,7 +133,6 @@ const Home: React.FC = () => {
 
   const applyFolderToState = (result: FolderResponse) => {
     const baseFiles = [...result.files];
-
     setAllFiles(baseFiles);
     setSearch('');
     setFiles(sortFiles(baseFiles, sortBy, sortOrder));
@@ -123,11 +142,8 @@ const Home: React.FC = () => {
 
   const loadFolder = async (uri: string, pushHistory = true, persist = true) => {
     try {
-      console.log('📂 loadFolder() =>', uri);
       setLoading(true);
-
       const result: FolderResponse = await listFiles(uri);
-      console.log('📂 Resultado listFiles():', result);
 
       if (pushHistory && currentUri && currentUri !== uri) {
         setHistory((prev) => [...prev, currentUri]);
@@ -148,18 +164,15 @@ const Home: React.FC = () => {
 
   const handlePickDirectory = async () => {
     try {
-      console.log('📁 Iniciando selección de carpeta...');
       setLoading(true);
 
       const result = await pickDirectory();
-      console.log('✅ Carpeta seleccionada:', result);
 
       if (!result?.uri) {
         throw new Error('No se recibió URI de carpeta');
       }
 
       const folder = await listFiles(result.uri);
-      console.log('📂 Resultado listFiles:', folder);
 
       applyFolderToState(folder);
       setHistory([]);
@@ -180,11 +193,9 @@ const Home: React.FC = () => {
     const newHistory = history.slice(0, -1);
 
     try {
-      console.log('⬅️ Volviendo a:', previousUri);
       setLoading(true);
 
       const result: FolderResponse = await listFiles(previousUri);
-      console.log('📂 Resultado volver atrás:', result);
 
       applyFolderToState(result);
       setHistory(newHistory);
@@ -198,6 +209,58 @@ const Home: React.FC = () => {
     }
   };
 
+  const isPreviewableText = (name: string) => {
+    const ext = name?.split('.').pop()?.toLowerCase() || '';
+    return [
+      'txt', 'json', 'js', 'ts', 'tsx', 'jsx',
+      'html', 'css', 'md', 'xml', 'log', 'csv',
+      'java', 'kt', 'php', 'sql', 'yml', 'yaml'
+    ].includes(ext);
+  };
+
+  const isPreviewableImage = (name: string) => {
+    const ext = name?.split('.').pop()?.toLowerCase() || '';
+    return ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
+  };
+
+  const handlePreview = async (item: FileItem) => {
+    try {
+      if (item.type === 'directory') return;
+
+      setPreviewLoading(true);
+      setPreviewTitle(item.name);
+      setPreviewText('');
+      setPreviewImage('');
+      setPreviewType(null);
+      setShowPreview(true);
+
+      const mimeType = item.mimeType || getMimeType(item.name);
+
+      if (isPreviewableImage(item.name)) {
+        const result = await getFileBase64(item.uri, mimeType);
+        setPreviewImage(`data:${result.mimeType};base64,${result.base64}`);
+        setPreviewType('image');
+        return;
+      }
+
+      if (isPreviewableText(item.name)) {
+        const result = await readTextFile(item.uri);
+        setPreviewText(result.content || '');
+        setPreviewType('text');
+        return;
+      }
+
+      alert('Este tipo de archivo no tiene preview interno todavía');
+      setShowPreview(false);
+    } catch (error: any) {
+      console.error('❌ Error preview:', error);
+      alert(error?.message || 'No se pudo previsualizar el archivo');
+      setShowPreview(false);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
   const handleOpenItem = async (item: FileItem) => {
     try {
       if (item.type === 'directory') {
@@ -205,9 +268,12 @@ const Home: React.FC = () => {
         return;
       }
 
-      const mimeType = item.mimeType || getMimeType(item.name);
-      console.log('📄 Abriendo archivo:', item.name, mimeType);
+      if (isPreviewableImage(item.name) || isPreviewableText(item.name)) {
+        await handlePreview(item);
+        return;
+      }
 
+      const mimeType = item.mimeType || getMimeType(item.name);
       await openFile(item.uri, mimeType);
     } catch (error: any) {
       console.error('❌ Error al abrir elemento:', error);
@@ -265,19 +331,11 @@ const Home: React.FC = () => {
   useEffect(() => {
     const restoreLastFolder = async () => {
       try {
-        console.log('🔄 Restaurando última carpeta...');
         const lastUri = await getLastFolderUri();
 
-        if (!lastUri) {
-          console.log('ℹ️ No hay carpeta guardada');
-          return;
-        }
-
-        console.log('📁 Última carpeta encontrada:', lastUri);
+        if (!lastUri) return;
 
         const folder = await listFiles(lastUri);
-        console.log('✅ Carpeta restaurada:', folder);
-
         applyFolderToState(folder);
         setHistory([]);
       } catch (error) {
@@ -422,6 +480,15 @@ const Home: React.FC = () => {
           onDidDismiss={() => setShowActionSheet(false)}
           header={selectedItem?.name || 'Opciones'}
           buttons={[
+            ...(selectedItem && selectedItem.type === 'file'
+              ? [{
+                  text: 'Preview',
+                  icon: eyeOutline,
+                  handler: async () => {
+                    if (selectedItem) await handlePreview(selectedItem);
+                  }
+                }]
+              : []),
             {
               text: 'Abrir',
               icon: openOutline,
@@ -465,6 +532,55 @@ const Home: React.FC = () => {
             }
           ]}
         />
+
+        <IonModal isOpen={showPreview} onDidDismiss={() => setShowPreview(false)}>
+          <IonHeader>
+            <IonToolbar>
+              <IonTitle>{previewTitle || 'Preview'}</IonTitle>
+              <IonButtons slot="end">
+                <IonButton onClick={() => setShowPreview(false)}>
+                  <IonIcon icon={closeOutline} />
+                </IonButton>
+              </IonButtons>
+            </IonToolbar>
+          </IonHeader>
+
+          <IonContent className="ion-padding">
+            {previewLoading && (
+              <div style={{ textAlign: 'center', marginTop: '40px' }}>
+                <IonSpinner name="crescent" />
+                <p>Cargando preview...</p>
+              </div>
+            )}
+
+            {!previewLoading && previewType === 'image' && previewImage && (
+              <div style={{ textAlign: 'center' }}>
+                <img
+                  src={previewImage}
+                  alt={previewTitle}
+                  style={{
+                    maxWidth: '100%',
+                    borderRadius: '12px',
+                    marginTop: '10px'
+                  }}
+                />
+              </div>
+            )}
+
+            {!previewLoading && previewType === 'text' && (
+              <IonTextarea
+                value={previewText}
+                autoGrow
+                readonly
+                style={{
+                  fontFamily: 'monospace',
+                  minHeight: '100%',
+                  whiteSpace: 'pre-wrap'
+                }}
+              />
+            )}
+          </IonContent>
+        </IonModal>
       </IonContent>
     </IonPage>
   );

@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.UriPermission;
 import android.net.Uri;
+import android.util.Base64;
 import android.util.Log;
 import android.webkit.MimeTypeMap;
 
@@ -18,6 +19,10 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.ByteArrayOutputStream;
 import java.util.List;
 
 @CapacitorPlugin(name = "Saf")
@@ -198,6 +203,88 @@ public class SafPlugin extends Plugin {
         } catch (Exception e) {
             Log.e(TAG, "Error en listFiles: " + e.getMessage(), e);
             call.reject("No se pudo listar la carpeta: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void readTextFile(PluginCall call) {
+        String uriString = call.getString("uri");
+
+        if (uriString == null || uriString.trim().isEmpty()) {
+            call.reject("URI requerida");
+            return;
+        }
+
+        try {
+            Uri uri = Uri.parse(uriString);
+            InputStream inputStream = getContext().getContentResolver().openInputStream(uri);
+
+            if (inputStream == null) {
+                call.reject("No se pudo abrir el archivo");
+                return;
+            }
+
+            BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
+            StringBuilder builder = new StringBuilder();
+            String line;
+
+            while ((line = reader.readLine()) != null) {
+                builder.append(line).append("\n");
+            }
+
+            reader.close();
+            inputStream.close();
+
+            JSObject result = new JSObject();
+            result.put("content", builder.toString());
+
+            call.resolve(result);
+        } catch (Exception e) {
+            Log.e(TAG, "Error leyendo texto: " + e.getMessage(), e);
+            call.reject("No se pudo leer el archivo: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void getFileBase64(PluginCall call) {
+        String uriString = call.getString("uri");
+        String mimeType = call.getString("mimeType", "*/*");
+
+        if (uriString == null || uriString.trim().isEmpty()) {
+            call.reject("URI requerida");
+            return;
+        }
+
+        try {
+            Uri uri = Uri.parse(uriString);
+            InputStream inputStream = getContext().getContentResolver().openInputStream(uri);
+
+            if (inputStream == null) {
+                call.reject("No se pudo abrir el archivo");
+                return;
+            }
+
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            byte[] data = new byte[8192];
+            int nRead;
+
+            while ((nRead = inputStream.read(data, 0, data.length)) != -1) {
+                buffer.write(data, 0, nRead);
+            }
+
+            buffer.flush();
+            inputStream.close();
+
+            String base64 = Base64.encodeToString(buffer.toByteArray(), Base64.NO_WRAP);
+
+            JSObject result = new JSObject();
+            result.put("base64", base64);
+            result.put("mimeType", mimeType);
+
+            call.resolve(result);
+        } catch (Exception e) {
+            Log.e(TAG, "Error obteniendo base64: " + e.getMessage(), e);
+            call.reject("No se pudo leer el archivo: " + e.getMessage());
         }
     }
 
