@@ -32,6 +32,8 @@ interface SafPlugin {
   createFolder(options: { parentUri: string; folderName: string }): Promise<GenericResult>;
   renameItem(options: { uri: string; newName: string; parentUri?: string }): Promise<GenericResult>;
   deleteItem(options: { uri: string }): Promise<GenericResult>;
+  duplicateItem(options: { uri: string; parentUri: string }): Promise<GenericResult>;
+  copyItem(options: { uri: string; destinationUri: string }): Promise<GenericResult>;
 }
 
 const Saf = registerPlugin<SafPlugin>('Saf');
@@ -50,3 +52,9 @@ export const renameItem = async (uri: string, newName: string, parentUri?: strin
 
 export const deleteItem = async (uri: string) =>
   await Saf.deleteItem({ uri });
+
+export const duplicateItem = async (uri: string, parentUri: string) =>
+  await Saf.duplicateItem({ uri, parentUri });
+
+export const copyItem = async (uri: string, destinationUri: string) =>
+  await Saf.copyItem({ uri, destinationUri });

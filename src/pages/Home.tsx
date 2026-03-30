@@ -57,7 +57,8 @@ import {
   getFileBase64,
   createFolder,
   renameItem,
-  deleteItem
+  deleteItem,
+  duplicateItem
 } from '../services/safService';
 import {
   saveLastFolderUri,
@@ -345,6 +346,21 @@ const Home: React.FC = () => {
     }
   };
 
+  const handleDuplicateItem = async () => {
+    try {
+      if (!selectedItem || !currentUri) return;
+  
+      setLoading(true);
+      await duplicateItem(selectedItem.uri, currentUri);
+      await refreshCurrentFolder();
+    } catch (error: any) {
+      console.error('❌ Error duplicando:', error);
+      alert(error?.message || 'No se pudo duplicar');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleShowOptions = (item: FileItem) => {
     setSelectedItem(item);
     setShowActionSheet(true);
@@ -564,6 +580,13 @@ const Home: React.FC = () => {
               icon: createOutline,
               handler: () => {
                 setShowRenameAlert(true);
+              }
+            },
+            {
+              text: 'Duplicar',
+              icon: copyOutline,
+              handler: async () => {
+                await handleDuplicateItem();
               }
             },
             {

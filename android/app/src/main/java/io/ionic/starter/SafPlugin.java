@@ -483,6 +483,154 @@ public class SafPlugin extends Plugin {
             call.reject("No se pudo abrir el archivo: " + e.getMessage());
         }
     }
+ //////////////////////////////////////////////////////////////////////////////////////
+    @PluginMethod
+    public void duplicateItem(PluginCall call) {
+        String uriString = call.getString("uri");
+        String parentUriString = call.getString("parentUri");
+
+        if (uriString == null || uriString.trim().isEmpty()) {
+            call.reject("URI requerida");
+            return;
+        }
+
+        if (parentUriString == null || parentUriString.trim().isEmpty()) {
+            call.reject("parentUri requerido");
+            return;
+        }
+
+        try {
+            Uri uri = Uri.parse(uriString);
+            DocumentFile source = resolveDocumentFile(uri);
+
+            if (source == null || !source.exists()) {
+                call.reject("No se pudo resolver el elemento");
+                return;
+            }
+
+            DocumentFile parent = DocumentFile.fromTreeUri(getContext(), Uri.parse(parentUriString));
+
+            if (parent == null || !parent.exists() || !parent.isDirectory()) {
+                call.reject("No se pudo acceder a la carpeta destino");
+                return;
+            }
+
+            String originalName = source.getName() != null ? source.getName() : "Elemento";
+            String duplicateName = generateDuplicateName(parent, originalName);
+
+            DocumentFile newItem;
+
+            if (source.isDirectory()) {
+                DocumentFile sourceDir = resolveDirectoryForTraversal(uri);
+
+                if (sourceDir == null || !sourceDir.exists() || !sourceDir.isDirectory()) {
+                    call.reject("No se pudo abrir la carpeta origen");
+                    return;
+                }
+
+                newItem = parent.createDirectory(duplicateName);
+
+                if (newItem == null) {
+                    call.reject("No se pudo crear la carpeta duplicada");
+                    return;
+                }
+
+                copyDirectoryContents(sourceDir, newItem);
+            } else {
+                newItem = copySingleFileWithName(source, parent, duplicateName);
+            }
+
+            if (newItem == null) {
+                call.reject("No se pudo duplicar el elemento");
+                return;
+            }
+
+            JSObject result = new JSObject();
+            result.put("success", true);
+            result.put("uri", newItem.getUri().toString());
+            result.put("name", newItem.getName());
+
+            call.resolve(result);
+
+        } catch (Exception e) {
+            Log.e(TAG, "Error duplicando: " + e.getMessage(), e);
+            call.reject("No se pudo duplicar: " + safeMessage(e));
+        }
+    }
+
+    @PluginMethod
+    public void copyItem(PluginCall call) {
+        String uriString = call.getString("uri");
+        String destinationUriString = call.getString("destinationUri");
+
+        if (uriString == null || uriString.trim().isEmpty()) {
+            call.reject("URI requerida");
+            return;
+        }
+
+        if (destinationUriString == null || destinationUriString.trim().isEmpty()) {
+            call.reject("destinationUri requerido");
+            return;
+        }
+
+        try {
+            Uri uri = Uri.parse(uriString);
+            DocumentFile source = resolveDocumentFile(uri);
+
+            if (source == null || !source.exists()) {
+                call.reject("No se pudo resolver el elemento origen");
+                return;
+            }
+
+            DocumentFile destination = DocumentFile.fromTreeUri(getContext(), Uri.parse(destinationUriString));
+
+            if (destination == null || !destination.exists() || !destination.isDirectory()) {
+                call.reject("No se pudo acceder a la carpeta destino");
+                return;
+            }
+
+            String originalName = source.getName() != null ? source.getName() : "Elemento";
+            String targetName = generateDuplicateName(destination, originalName);
+
+            DocumentFile newItem;
+
+            if (source.isDirectory()) {
+                DocumentFile sourceDir = resolveDirectoryForTraversal(uri);
+
+                if (sourceDir == null || !sourceDir.exists() || !sourceDir.isDirectory()) {
+                    call.reject("No se pudo abrir la carpeta origen");
+                    return;
+                }
+
+                newItem = destination.createDirectory(targetName);
+
+                if (newItem == null) {
+                    call.reject("No se pudo crear la carpeta destino");
+                    return;
+                }
+
+                copyDirectoryContents(sourceDir, newItem);
+            } else {
+                newItem = copySingleFileWithName(source, destination, targetName);
+            }
+
+            if (newItem == null) {
+                call.reject("No se pudo copiar el elemento");
+                return;
+            }
+
+            JSObject result = new JSObject();
+            result.put("success", true);
+            result.put("uri", newItem.getUri().toString());
+            result.put("name", newItem.getName());
+
+            call.resolve(result);
+
+        } catch (Exception e) {
+            Log.e(TAG, "Error copiando: " + e.getMessage(), e);
+            call.reject("No se pudo copiar: " + safeMessage(e));
+        }
+    }
 
     private boolean hasPersistedPermission(Uri uri) {
         try {
@@ -644,6 +792,84 @@ public class SafPlugin extends Plugin {
         }
     
         return null;
+    }
+
+    private DocumentFile copySingleFileWithName(DocumentFile sourceFile, DocumentFile targetDir, String customName) throws Exception {
+        if (sourceFile == null || targetDir == null) {
+            throw new Exception("Archivo origen o destino inválido");
+        }
+    
+        String fileName = (customName != null && !customName.trim().isEmpty())
+            ? customName
+            : (sourceFile.getName() != null ? sourceFile.getName() : "archivo");
+    
+        String mimeType = sourceFile.getType();
+    
+        if (mimeType == null || mimeType.trim().isEmpty()) {
+            mimeType = "*/*";
+        }
+    
+        DocumentFile newFile = targetDir.createFile(mimeType, fileName);
+    
+        if (newFile == null) {
+            throw new Exception("No se pudo crear archivo destino: " + fileName);
+        }
+    
+        InputStream in = null;
+        java.io.OutputStream out = null;
+    
+        try {
+            in = getContext().getContentResolver().openInputStream(sourceFile.getUri());
+            out = getContext().getContentResolver().openOutputStream(newFile.getUri());
+    
+            if (in == null || out == null) {
+                throw new Exception("No se pudo abrir stream de copiado para: " + fileName);
+            }
+    
+            byte[] buffer = new byte[8192];
+            int len;
+    
+            while ((len = in.read(buffer)) > 0) {
+                out.write(buffer, 0, len);
+            }
+    
+            out.flush();
+        } finally {
+            try {
+                if (in != null) in.close();
+            } catch (Exception ignored) {}
+    
+            try {
+                if (out != null) out.close();
+            } catch (Exception ignored) {}
+        }
+    
+        return newFile;
+    }
+
+    private String generateDuplicateName(DocumentFile parent, String originalName) {
+        if (parent == null || originalName == null || originalName.trim().isEmpty()) {
+            return "Copia";
+        }
+    
+        String baseName = originalName;
+        String extension = "";
+    
+        int dotIndex = originalName.lastIndexOf('.');
+        if (dotIndex > 0 && dotIndex < originalName.length() - 1) {
+            baseName = originalName.substring(0, dotIndex);
+            extension = originalName.substring(dotIndex);
+        }
+    
+        String candidate = baseName + " (copia)" + extension;
+        int counter = 2;
+    
+        while (parent.findFile(candidate) != null) {
+            candidate = baseName + " (copia " + counter + ")" + extension;
+            counter++;
+        }
+    
+        return candidate;
     }
 
 }
