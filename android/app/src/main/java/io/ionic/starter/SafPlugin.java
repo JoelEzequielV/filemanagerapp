@@ -632,6 +632,95 @@ public class SafPlugin extends Plugin {
         }
     }
 
+    @PluginMethod
+    public void moveItem(PluginCall call) {
+        String uriString = call.getString("uri");
+        String destinationUriString = call.getString("destinationUri");
+
+        if (uriString == null || uriString.trim().isEmpty()) {
+            call.reject("URI requerida");
+            return;
+        }
+
+        if (destinationUriString == null || destinationUriString.trim().isEmpty()) {
+            call.reject("destinationUri requerido");
+            return;
+        }
+
+        if (isSameOrChildUri(uriString, destinationUriString)) {
+            call.reject("No se puede mover una carpeta dentro de sí misma");
+            return;
+        }
+
+        try {
+            Uri uri = Uri.parse(uriString);
+            DocumentFile source = resolveDocumentFile(uri);
+
+            if (source == null || !source.exists()) {
+                call.reject("No se pudo resolver el elemento origen");
+                return;
+            }
+
+            DocumentFile destination = DocumentFile.fromTreeUri(getContext(), Uri.parse(destinationUriString));
+
+            if (destination == null || !destination.exists() || !destination.isDirectory()) {
+                call.reject("No se pudo acceder a la carpeta destino");
+                return;
+            }
+
+            String originalName = source.getName() != null ? source.getName() : "Elemento";
+            String targetName = generateDuplicateName(destination, originalName);
+
+            DocumentFile newItem;
+
+            if (source.isDirectory()) {
+                DocumentFile sourceDir = resolveDirectoryForTraversal(uri);
+
+                if (sourceDir == null || !sourceDir.exists() || !sourceDir.isDirectory()) {
+                    call.reject("No se pudo abrir la carpeta origen");
+                    return;
+                }
+
+                newItem = destination.createDirectory(targetName);
+
+                if (newItem == null) {
+                    call.reject("No se pudo crear la carpeta destino");
+                    return;
+                }
+
+                copyDirectoryContents(sourceDir, newItem);
+
+                boolean deleted = sourceDir.delete();
+                if (!deleted) {
+                    Log.w(TAG, "No se pudo eliminar la carpeta original después de mover");
+                }
+            } else {
+                newItem = copySingleFileWithName(source, destination, targetName);
+
+                boolean deleted = source.delete();
+                if (!deleted) {
+                    Log.w(TAG, "No se pudo eliminar el archivo original después de mover");
+                }
+            }
+
+            if (newItem == null) {
+                call.reject("No se pudo mover el elemento");
+                return;
+            }
+
+            JSObject result = new JSObject();
+            result.put("success", true);
+            result.put("uri", newItem.getUri().toString());
+            result.put("name", newItem.getName());
+
+            call.resolve(result);
+
+        } catch (Exception e) {
+            Log.e(TAG, "Error moviendo: " + e.getMessage(), e);
+            call.reject("No se pudo mover: " + safeMessage(e));
+        }
+    }
+
     private boolean hasPersistedPermission(Uri uri) {
         try {
             List<UriPermission> permissions = getActivity()
@@ -870,6 +959,11 @@ public class SafPlugin extends Plugin {
         }
     
         return candidate;
+    }
+
+    private boolean isSameOrChildUri(String sourceUri, String destinationUri) {
+        if (sourceUri == null || destinationUri == null) return false;
+        return destinationUri.startsWith(sourceUri);
     }
 
 }

@@ -59,7 +59,8 @@ import {
   renameItem,
   deleteItem,
   duplicateItem,
-  copyItem
+  copyItem,
+  moveItem
 } from '../services/safService';
 import {
   saveLastFolderUri,
@@ -87,6 +88,7 @@ const Home: React.FC = () => {
   const [showActionSheet, setShowActionSheet] = useState(false);
 
   const [pendingCopyItem, setPendingCopyItem] = useState<FileItem | null>(null);
+  const [pendingMoveItem, setPendingMoveItem] = useState<FileItem | null>(null);
 
   const [showPreview, setShowPreview] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -104,6 +106,11 @@ const Home: React.FC = () => {
     await loadFolder(currentUri, false, false);
   };
 
+  const clearSelection = () => {
+    setSelectedItem(null);
+    setShowActionSheet(false);
+  };
+
   const sortFiles = (
     items: FileItem[],
     criteria: 'name' | 'date' | 'size' = sortBy,
@@ -116,15 +123,15 @@ const Home: React.FC = () => {
       let comparison = 0;
 
       if (criteria === 'name') {
-        comparison = a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
+        comparison = (a.name || '').localeCompare(b.name || '', 'es', { sensitivity: 'base' });
       }
 
       if (criteria === 'date') {
-        comparison = a.lastModified - b.lastModified;
+        comparison = (a.lastModified || 0) - (b.lastModified || 0);
       }
 
       if (criteria === 'size') {
-        comparison = a.size - b.size;
+        comparison = (a.size || 0) - (b.size || 0);
       }
 
       return order === 'asc' ? comparison : -comparison;
@@ -183,9 +190,13 @@ const Home: React.FC = () => {
   const handlePickDirectory = async () => {
     try {
       setLoading(true);
+
       const result = await pickDirectory();
 
-      if (!result?.uri) throw new Error('No se recibió URI de carpeta');
+      if (!result?.uri) {
+        setLoading(false);
+        return;
+      }
 
       const folder = await listFiles(result.uri);
       applyFolderToState(folder);
@@ -251,7 +262,16 @@ const Home: React.FC = () => {
 
       if (isPreviewableText(item.name)) {
         const result = await readTextFile(item.uri);
-        setPreviewText(result.content || '');
+        const content = result.content || '';
+
+        // Evita congelar la UI con archivos de texto enormes
+        const maxPreviewChars = 50000;
+        setPreviewText(
+          content.length > maxPreviewChars
+            ? content.slice(0, maxPreviewChars) + '\n\n--- Preview truncado por tamaño ---'
+            : content
+        );
+
         setPreviewType('text');
         return;
       }
@@ -290,6 +310,7 @@ const Home: React.FC = () => {
   const handleCreateFolder = async (folderName: string) => {
     try {
       if (!currentUri) return;
+
       const cleanName = folderName.trim();
       if (!cleanName) return;
 
@@ -301,36 +322,43 @@ const Home: React.FC = () => {
       alert(error?.message || 'No se pudo crear la carpeta');
     } finally {
       setLoading(false);
+      setShowCreateFolderAlert(false);
     }
   };
 
   const handleRenameItem = async (newName: string) => {
     try {
       if (!selectedItem) return;
+
       const cleanName = newName.trim();
       if (!cleanName) return;
-  
+
       setLoading(true);
-  
+
+      const itemToRename = selectedItem;
+
       const result = await renameItem(
-        selectedItem.uri,
+        itemToRename.uri,
         cleanName,
         currentUri || undefined
       );
-  
-      const wasCurrentFolder = currentUri === selectedItem.uri;
-      const newUri = result?.uri || selectedItem.uri;
-  
-      if (wasCurrentFolder && selectedItem.type === 'directory') {
+
+      const wasCurrentFolder = currentUri === itemToRename.uri;
+      const newUri = result?.uri || itemToRename.uri;
+
+      if (wasCurrentFolder && itemToRename.type === 'directory') {
         await loadFolder(newUri, false, true);
       } else {
         await refreshCurrentFolder();
       }
+
+      clearSelection();
     } catch (error: any) {
       console.error('❌ Error renombrando:', error);
       alert(error?.message || 'No se pudo renombrar');
     } finally {
       setLoading(false);
+      setShowRenameAlert(false);
     }
   };
 
@@ -341,21 +369,24 @@ const Home: React.FC = () => {
       setLoading(true);
       await deleteItem(selectedItem.uri);
       await refreshCurrentFolder();
+      clearSelection();
     } catch (error: any) {
       console.error('❌ Error eliminando:', error);
       alert(error?.message || 'No se pudo eliminar');
     } finally {
       setLoading(false);
+      setShowDeleteAlert(false);
     }
   };
 
   const handleDuplicateItem = async () => {
     try {
       if (!selectedItem || !currentUri) return;
-  
+
       setLoading(true);
       await duplicateItem(selectedItem.uri, currentUri);
       await refreshCurrentFolder();
+      clearSelection();
     } catch (error: any) {
       console.error('❌ Error duplicando:', error);
       alert(error?.message || 'No se pudo duplicar');
@@ -364,25 +395,36 @@ const Home: React.FC = () => {
     }
   };
 
+  const handleCopyToSelectedFolder = async (item: FileItem, destinationUri: string) => {
+    await copyItem(item.uri, destinationUri);
+
+    if (currentUri === destinationUri) {
+      await refreshCurrentFolder();
+    }
+  };
+
   const handleStartCopyItem = async () => {
     try {
       if (!selectedItem) return;
-  
+
       const itemToCopy = selectedItem;
-  
+
       setPendingCopyItem(itemToCopy);
       setShowActionSheet(false);
-  
       setLoading(true);
+
       const destination = await pickDirectory();
-  
+
       if (!destination?.uri) {
-        throw new Error('No se seleccionó carpeta destino');
+        setPendingCopyItem(null);
+        setLoading(false);
+        return;
       }
-  
+
       await handleCopyToSelectedFolder(itemToCopy, destination.uri);
-  
+
       alert(`"${itemToCopy.name}" copiado correctamente`);
+      clearSelection();
     } catch (error: any) {
       console.error('❌ Error copiando a otra carpeta:', error);
       alert(error?.message || 'No se pudo copiar');
@@ -392,11 +434,39 @@ const Home: React.FC = () => {
     }
   };
 
-  const handleCopyToSelectedFolder = async (item: FileItem, destinationUri: string) => {
-    await copyItem(item.uri, destinationUri);
-  
-    if (currentUri === destinationUri) {
-      await refreshCurrentFolder();
+  const handleMoveToSelectedFolder = async (item: FileItem, destinationUri: string) => {
+    await moveItem(item.uri, destinationUri);
+    await refreshCurrentFolder();
+  };
+
+  const handleStartMoveItem = async () => {
+    try {
+      if (!selectedItem) return;
+
+      const itemToMove = selectedItem;
+
+      setPendingMoveItem(itemToMove);
+      setShowActionSheet(false);
+      setLoading(true);
+
+      const destination = await pickDirectory();
+
+      if (!destination?.uri) {
+        setPendingMoveItem(null);
+        setLoading(false);
+        return;
+      }
+
+      await handleMoveToSelectedFolder(itemToMove, destination.uri);
+
+      alert(`"${itemToMove.name}" movido correctamente`);
+      clearSelection();
+    } catch (error: any) {
+      console.error('❌ Error moviendo:', error);
+      alert(error?.message || 'No se pudo mover');
+    } finally {
+      setPendingMoveItem(null);
+      setLoading(false);
     }
   };
 
@@ -449,7 +519,11 @@ const Home: React.FC = () => {
     const restoreLastFolder = async () => {
       try {
         const lastUri = await getLastFolderUri();
-        if (!lastUri) return;
+
+        if (!lastUri) {
+          setInitializing(false);
+          return;
+        }
 
         const folder = await listFiles(lastUri);
         applyFolderToState(folder);
@@ -540,7 +614,15 @@ const Home: React.FC = () => {
         {(loading || initializing) && (
           <div style={{ textAlign: 'center', marginTop: '30px' }}>
             <IonSpinner name="crescent" />
-            <p>{initializing ? 'Restaurando carpeta...' : 'Cargando...'}</p>
+            <p>
+              {initializing
+                ? 'Restaurando carpeta...'
+                : pendingMoveItem
+                ? `Moviendo "${pendingMoveItem.name}"...`
+                : pendingCopyItem
+                ? `Copiando "${pendingCopyItem.name}"...`
+                : 'Cargando...'}
+            </p>
           </div>
         )}
 
@@ -602,37 +684,52 @@ const Home: React.FC = () => {
               ? [{
                   text: 'Preview',
                   icon: eyeOutline,
-                  handler: async () => {
-                    if (selectedItem) await handlePreview(selectedItem);
+                  handler: () => {
+                    if (selectedItem) {
+                      setShowActionSheet(false);
+                      setTimeout(() => handlePreview(selectedItem), 150);
+                    }
                   }
                 }]
               : []),
             {
               text: 'Abrir',
               icon: openOutline,
-              handler: async () => {
-                if (selectedItem) await handleOpenItem(selectedItem);
+              handler: () => {
+                if (selectedItem) {
+                  setShowActionSheet(false);
+                  setTimeout(() => handleOpenItem(selectedItem), 150);
+                }
               }
             },
             {
               text: 'Renombrar',
               icon: createOutline,
               handler: () => {
-                setShowRenameAlert(true);
+                setShowActionSheet(false);
+                setTimeout(() => setShowRenameAlert(true), 150);
               }
             },
             {
               text: 'Duplicar',
               icon: copyOutline,
-              handler: async () => {
-                await handleDuplicateItem();
+              handler: () => {
+                setShowActionSheet(false);
+                setTimeout(() => handleDuplicateItem(), 150);
               }
             },
             {
               text: 'Copiar a...',
               icon: copyOutline,
-              handler: async () => {
-                await handleStartCopyItem();
+              handler: () => {
+                setTimeout(() => handleStartCopyItem(), 150);
+              }
+            },
+            {
+              text: 'Mover a...',
+              icon: folderOpenOutline,
+              handler: () => {
+                setTimeout(() => handleStartMoveItem(), 150);
               }
             },
             {
@@ -640,28 +737,38 @@ const Home: React.FC = () => {
               role: 'destructive',
               icon: trashOutline,
               handler: () => {
-                setShowDeleteAlert(true);
+                setShowActionSheet(false);
+                setTimeout(() => setShowDeleteAlert(true), 150);
               }
             },
             {
               text: 'Ver detalles',
               icon: informationCircleOutline,
               handler: () => {
-                if (selectedItem) handleShowDetails(selectedItem);
+                if (selectedItem) {
+                  setShowActionSheet(false);
+                  setTimeout(() => handleShowDetails(selectedItem), 150);
+                }
               }
             },
             {
               text: 'Copiar nombre',
               icon: copyOutline,
-              handler: async () => {
-                if (selectedItem) await handleCopyText(selectedItem.name, 'Nombre');
+              handler: () => {
+                if (selectedItem) {
+                  setShowActionSheet(false);
+                  setTimeout(() => handleCopyText(selectedItem.name, 'Nombre'), 150);
+                }
               }
             },
             {
               text: 'Copiar URI',
               icon: copyOutline,
-              handler: async () => {
-                if (selectedItem) await handleCopyText(selectedItem.uri, 'URI');
+              handler: () => {
+                if (selectedItem) {
+                  setShowActionSheet(false);
+                  setTimeout(() => handleCopyText(selectedItem.uri, 'URI'), 150);
+                }
               }
             },
             {

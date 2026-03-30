@@ -34,6 +34,7 @@ interface SafPlugin {
   deleteItem(options: { uri: string }): Promise<GenericResult>;
   duplicateItem(options: { uri: string; parentUri: string }): Promise<GenericResult>;
   copyItem(options: { uri: string; destinationUri: string }): Promise<GenericResult>;
+  moveItem(options: { uri: string; destinationUri: string }): Promise<GenericResult>;
 }
 
 const Saf = registerPlugin<SafPlugin>('Saf');
@@ -58,3 +59,6 @@ export const duplicateItem = async (uri: string, parentUri: string) =>
 
 export const copyItem = async (uri: string, destinationUri: string) =>
   await Saf.copyItem({ uri, destinationUri });
+
+export const moveItem = async (uri: string, destinationUri: string) =>
+  await Saf.moveItem({ uri, destinationUri });
