@@ -38,8 +38,6 @@ public class SafPlugin extends Plugin {
 
     @PluginMethod
     public void pickDirectory(PluginCall call) {
-        Log.d(TAG, "pickDirectory() invocado");
-
         Activity activity = getActivity();
 
         if (activity == null) {
@@ -56,7 +54,6 @@ public class SafPlugin extends Plugin {
         );
 
         try {
-            Log.d(TAG, "Lanzando selector con ActivityCallback...");
             startActivityForResult(call, intent, "pickDirectoryResult");
         } catch (Exception e) {
             Log.e(TAG, "Error lanzando selector: " + e.getMessage(), e);
@@ -66,23 +63,14 @@ public class SafPlugin extends Plugin {
 
     @ActivityCallback
     private void pickDirectoryResult(PluginCall call, ActivityResult result) {
-        Log.d(TAG, "pickDirectoryResult() ejecutado");
-
-        if (call == null) {
-            Log.e(TAG, "PluginCall vino null");
-            return;
-        }
+        if (call == null) return;
 
         if (result == null) {
-            Log.e(TAG, "ActivityResult vino null");
             call.reject("No se recibió resultado del selector");
             return;
         }
 
-        Log.d(TAG, "resultCode=" + result.getResultCode());
-
         if (result.getResultCode() != Activity.RESULT_OK) {
-            Log.e(TAG, "Usuario canceló la selección");
             call.reject("No se seleccionó carpeta");
             return;
         }
@@ -90,7 +78,6 @@ public class SafPlugin extends Plugin {
         Intent data = result.getData();
 
         if (data == null) {
-            Log.e(TAG, "Intent data vino null");
             call.reject("Android no devolvió datos");
             return;
         }
@@ -98,29 +85,23 @@ public class SafPlugin extends Plugin {
         Uri uri = data.getData();
 
         if (uri == null) {
-            Log.e(TAG, "La URI vino null");
             call.reject("No se pudo obtener la URI");
             return;
         }
 
         try {
-            Log.d(TAG, "URI RECIBIDA: " + uri);
-
             final int takeFlags =
                 data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
 
             getActivity().getContentResolver().takePersistableUriPermission(uri, takeFlags);
 
             boolean hasPermission = hasPersistedPermission(uri);
-            Log.d(TAG, "Permiso persistente guardado: " + hasPermission);
 
             JSObject ret = new JSObject();
             ret.put("uri", uri.toString());
             ret.put("persisted", hasPermission);
 
             call.resolve(ret);
-            Log.d(TAG, "pickDirectory RESUELTO OK");
-
         } catch (Exception e) {
             Log.e(TAG, "Error al guardar permisos: " + e.getMessage(), e);
             call.reject("Error al guardar permisos: " + e.getMessage());
@@ -129,43 +110,33 @@ public class SafPlugin extends Plugin {
 
     @PluginMethod
     public void listFiles(PluginCall call) {
-        Log.d(TAG, "listFiles() invocado");
-
         String uriString = call.getString("uri");
 
         if (uriString == null || uriString.trim().isEmpty()) {
-            Log.e(TAG, "URI requerida pero vino null/vacía");
             call.reject("URI requerida");
             return;
         }
 
         try {
-            Log.d(TAG, "URI recibida en listFiles: " + uriString);
-
             Uri uri = Uri.parse(uriString);
             DocumentFile dir = DocumentFile.fromTreeUri(getContext(), uri);
 
             if (dir == null) {
-                Log.e(TAG, "DocumentFile.fromTreeUri devolvió null");
                 call.reject("No se pudo acceder al directorio");
                 return;
             }
 
             if (!dir.exists()) {
-                Log.e(TAG, "La carpeta no existe o no es accesible");
                 call.reject("La carpeta ya no existe o no es accesible");
                 return;
             }
 
             if (!dir.isDirectory()) {
-                Log.e(TAG, "La URI no corresponde a una carpeta");
                 call.reject("La URI no corresponde a una carpeta");
                 return;
             }
 
             DocumentFile[] files = dir.listFiles();
-            Log.d(TAG, "Cantidad de archivos encontrados: " + files.length);
-
             JSArray filesArray = new JSArray();
 
             for (DocumentFile file : files) {
@@ -197,12 +168,133 @@ public class SafPlugin extends Plugin {
             result.put("files", filesArray);
             result.put("persisted", hasPersistedPermission(uri));
 
-            Log.d(TAG, "listFiles() resolviendo OK");
             call.resolve(result);
 
         } catch (Exception e) {
             Log.e(TAG, "Error en listFiles: " + e.getMessage(), e);
             call.reject("No se pudo listar la carpeta: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void createFolder(PluginCall call) {
+        String parentUri = call.getString("parentUri");
+        String folderName = call.getString("folderName");
+
+        if (parentUri == null || parentUri.trim().isEmpty()) {
+            call.reject("parentUri requerido");
+            return;
+        }
+
+        if (folderName == null || folderName.trim().isEmpty()) {
+            call.reject("folderName requerido");
+            return;
+        }
+
+        try {
+            DocumentFile parent = DocumentFile.fromTreeUri(getContext(), Uri.parse(parentUri));
+
+            if (parent == null || !parent.exists() || !parent.isDirectory()) {
+                call.reject("No se pudo acceder a la carpeta padre");
+                return;
+            }
+
+            DocumentFile existing = parent.findFile(folderName);
+            if (existing != null) {
+                call.reject("Ya existe un archivo o carpeta con ese nombre");
+                return;
+            }
+
+            DocumentFile newFolder = parent.createDirectory(folderName);
+
+            if (newFolder == null) {
+                call.reject("No se pudo crear la carpeta");
+                return;
+            }
+
+            JSObject result = new JSObject();
+            result.put("uri", newFolder.getUri().toString());
+            result.put("name", newFolder.getName());
+
+            call.resolve(result);
+        } catch (Exception e) {
+            Log.e(TAG, "Error creando carpeta: " + e.getMessage(), e);
+            call.reject("No se pudo crear la carpeta: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void renameItem(PluginCall call) {
+        String uriString = call.getString("uri");
+        String newName = call.getString("newName");
+
+        if (uriString == null || uriString.trim().isEmpty()) {
+            call.reject("URI requerida");
+            return;
+        }
+
+        if (newName == null || newName.trim().isEmpty()) {
+            call.reject("Nuevo nombre requerido");
+            return;
+        }
+
+        try {
+            DocumentFile file = DocumentFile.fromSingleUri(getContext(), Uri.parse(uriString));
+
+            if (file == null || !file.exists()) {
+                call.reject("El elemento no existe");
+                return;
+            }
+
+            boolean renamed = file.renameTo(newName);
+
+            if (!renamed) {
+                call.reject("No se pudo renombrar el elemento");
+                return;
+            }
+
+            JSObject result = new JSObject();
+            result.put("success", true);
+            result.put("newName", newName);
+
+            call.resolve(result);
+        } catch (Exception e) {
+            Log.e(TAG, "Error renombrando: " + e.getMessage(), e);
+            call.reject("No se pudo renombrar: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void deleteItem(PluginCall call) {
+        String uriString = call.getString("uri");
+
+        if (uriString == null || uriString.trim().isEmpty()) {
+            call.reject("URI requerida");
+            return;
+        }
+
+        try {
+            DocumentFile file = DocumentFile.fromSingleUri(getContext(), Uri.parse(uriString));
+
+            if (file == null || !file.exists()) {
+                call.reject("El elemento no existe");
+                return;
+            }
+
+            boolean deleted = file.delete();
+
+            if (!deleted) {
+                call.reject("No se pudo eliminar el elemento");
+                return;
+            }
+
+            JSObject result = new JSObject();
+            result.put("success", true);
+
+            call.resolve(result);
+        } catch (Exception e) {
+            Log.e(TAG, "Error eliminando: " + e.getMessage(), e);
+            call.reject("No se pudo eliminar: " + e.getMessage());
         }
     }
 

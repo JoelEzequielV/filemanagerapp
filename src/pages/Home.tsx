@@ -20,6 +20,9 @@ import {
   IonActionSheet,
   IonModal,
   IonTextarea,
+  IonAlert,
+  IonFab,
+  IonFabButton,
 } from '@ionic/react';
 
 import {
@@ -37,7 +40,10 @@ import {
   informationCircleOutline,
   copyOutline,
   closeOutline,
-  eyeOutline
+  eyeOutline,
+  addOutline,
+  createOutline,
+  trashOutline
 } from 'ionicons/icons';
 
 import { formatBytes, formatDate } from '../utils/fileFormat';
@@ -48,7 +54,10 @@ import {
   listFiles,
   openFile,
   readTextFile,
-  getFileBase64
+  getFileBase64,
+  createFolder,
+  renameItem,
+  deleteItem
 } from '../services/safService';
 import {
   saveLastFolderUri,
@@ -82,9 +91,14 @@ const Home: React.FC = () => {
   const [previewText, setPreviewText] = useState('');
   const [previewImage, setPreviewImage] = useState('');
 
-  useEffect(() => {
-    console.log('Plugins disponibles:', (window as any).Capacitor?.Plugins);
-  }, []);
+  const [showCreateFolderAlert, setShowCreateFolderAlert] = useState(false);
+  const [showRenameAlert, setShowRenameAlert] = useState(false);
+  const [showDeleteAlert, setShowDeleteAlert] = useState(false);
+
+  const refreshCurrentFolder = async () => {
+    if (!currentUri) return;
+    await loadFolder(currentUri, false, false);
+  };
 
   const sortFiles = (
     items: FileItem[],
@@ -165,18 +179,13 @@ const Home: React.FC = () => {
   const handlePickDirectory = async () => {
     try {
       setLoading(true);
-
       const result = await pickDirectory();
 
-      if (!result?.uri) {
-        throw new Error('No se recibió URI de carpeta');
-      }
+      if (!result?.uri) throw new Error('No se recibió URI de carpeta');
 
       const folder = await listFiles(result.uri);
-
       applyFolderToState(folder);
       setHistory([]);
-
       await saveLastFolderUri(folder.currentUri);
     } catch (error: any) {
       console.error('❌ Error al seleccionar carpeta:', error);
@@ -194,12 +203,9 @@ const Home: React.FC = () => {
 
     try {
       setLoading(true);
-
       const result: FolderResponse = await listFiles(previousUri);
-
       applyFolderToState(result);
       setHistory(newHistory);
-
       await saveLastFolderUri(result.currentUri);
     } catch (error: any) {
       console.error('❌ Error volviendo atrás:', error);
@@ -211,11 +217,7 @@ const Home: React.FC = () => {
 
   const isPreviewableText = (name: string) => {
     const ext = name?.split('.').pop()?.toLowerCase() || '';
-    return [
-      'txt', 'json', 'js', 'ts', 'tsx', 'jsx',
-      'html', 'css', 'md', 'xml', 'log', 'csv',
-      'java', 'kt', 'php', 'sql', 'yml', 'yaml'
-    ].includes(ext);
+    return ['txt', 'json', 'js', 'ts', 'tsx', 'jsx', 'html', 'css', 'md', 'xml', 'log', 'csv', 'java', 'kt', 'php', 'sql', 'yml', 'yaml'].includes(ext);
   };
 
   const isPreviewableImage = (name: string) => {
@@ -281,6 +283,55 @@ const Home: React.FC = () => {
     }
   };
 
+  const handleCreateFolder = async (folderName: string) => {
+    try {
+      if (!currentUri) return;
+      const cleanName = folderName.trim();
+      if (!cleanName) return;
+
+      setLoading(true);
+      await createFolder(currentUri, cleanName);
+      await refreshCurrentFolder();
+    } catch (error: any) {
+      console.error('❌ Error creando carpeta:', error);
+      alert(error?.message || 'No se pudo crear la carpeta');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRenameItem = async (newName: string) => {
+    try {
+      if (!selectedItem) return;
+      const cleanName = newName.trim();
+      if (!cleanName) return;
+
+      setLoading(true);
+      await renameItem(selectedItem.uri, cleanName);
+      await refreshCurrentFolder();
+    } catch (error: any) {
+      console.error('❌ Error renombrando:', error);
+      alert(error?.message || 'No se pudo renombrar');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteItem = async () => {
+    try {
+      if (!selectedItem) return;
+
+      setLoading(true);
+      await deleteItem(selectedItem.uri);
+      await refreshCurrentFolder();
+    } catch (error: any) {
+      console.error('❌ Error eliminando:', error);
+      alert(error?.message || 'No se pudo eliminar');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleShowOptions = (item: FileItem) => {
     setSelectedItem(item);
     setShowActionSheet(true);
@@ -309,11 +360,9 @@ const Home: React.FC = () => {
 
   const getFileIcon = (item: FileItem) => {
     if (item.type === 'directory') return folderOutline;
-
     const ext = item.name?.split('.').pop()?.toLowerCase();
 
     if (!ext) return documentOutline;
-
     if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) return imageOutline;
     if (['mp4', 'mkv', 'avi', 'mov', 'webm'].includes(ext)) return videocamOutline;
     if (['mp3', 'wav', 'ogg', 'flac', 'm4a'].includes(ext)) return musicalNotesOutline;
@@ -332,7 +381,6 @@ const Home: React.FC = () => {
     const restoreLastFolder = async () => {
       try {
         const lastUri = await getLastFolderUri();
-
         if (!lastUri) return;
 
         const folder = await listFiles(lastUri);
@@ -444,11 +492,7 @@ const Home: React.FC = () => {
                 detail={false}
                 onClick={() => handleOpenItem(item)}
               >
-                <IonIcon
-                  icon={getFileIcon(item)}
-                  slot="start"
-                  style={{ fontSize: '24px' }}
-                />
+                <IonIcon icon={getFileIcon(item)} slot="start" style={{ fontSize: '24px' }} />
 
                 <IonLabel>
                   <h2 style={{ fontWeight: 600 }}>{item.name}</h2>
@@ -475,6 +519,12 @@ const Home: React.FC = () => {
           </IonList>
         )}
 
+        <IonFab vertical="bottom" horizontal="end" slot="fixed">
+          <IonFabButton onClick={() => setShowCreateFolderAlert(true)} disabled={!currentUri || loading || initializing}>
+            <IonIcon icon={addOutline} />
+          </IonFabButton>
+        </IonFab>
+
         <IonActionSheet
           isOpen={showActionSheet}
           onDidDismiss={() => setShowActionSheet(false)}
@@ -493,42 +543,111 @@ const Home: React.FC = () => {
               text: 'Abrir',
               icon: openOutline,
               handler: async () => {
-                if (selectedItem) {
-                  await handleOpenItem(selectedItem);
-                }
+                if (selectedItem) await handleOpenItem(selectedItem);
+              }
+            },
+            {
+              text: 'Renombrar',
+              icon: createOutline,
+              handler: () => {
+                setShowRenameAlert(true);
+              }
+            },
+            {
+              text: 'Eliminar',
+              role: 'destructive',
+              icon: trashOutline,
+              handler: () => {
+                setShowDeleteAlert(true);
               }
             },
             {
               text: 'Ver detalles',
               icon: informationCircleOutline,
               handler: () => {
-                if (selectedItem) {
-                  handleShowDetails(selectedItem);
-                }
+                if (selectedItem) handleShowDetails(selectedItem);
               }
             },
             {
               text: 'Copiar nombre',
               icon: copyOutline,
               handler: async () => {
-                if (selectedItem) {
-                  await handleCopyText(selectedItem.name, 'Nombre');
-                }
+                if (selectedItem) await handleCopyText(selectedItem.name, 'Nombre');
               }
             },
             {
               text: 'Copiar URI',
               icon: copyOutline,
               handler: async () => {
-                if (selectedItem) {
-                  await handleCopyText(selectedItem.uri, 'URI');
-                }
+                if (selectedItem) await handleCopyText(selectedItem.uri, 'URI');
               }
             },
             {
               text: 'Cancelar',
               role: 'cancel',
               icon: closeOutline
+            }
+          ]}
+        />
+
+        <IonAlert
+          isOpen={showCreateFolderAlert}
+          onDidDismiss={() => setShowCreateFolderAlert(false)}
+          header="Nueva carpeta"
+          inputs={[
+            {
+              name: 'folderName',
+              type: 'text',
+              placeholder: 'Nombre de la carpeta'
+            }
+          ]}
+          buttons={[
+            { text: 'Cancelar', role: 'cancel' },
+            {
+              text: 'Crear',
+              handler: async (data) => {
+                await handleCreateFolder(data.folderName || '');
+              }
+            }
+          ]}
+        />
+
+        <IonAlert
+          isOpen={showRenameAlert}
+          onDidDismiss={() => setShowRenameAlert(false)}
+          header="Renombrar"
+          inputs={[
+            {
+              name: 'newName',
+              type: 'text',
+              placeholder: 'Nuevo nombre',
+              value: selectedItem?.name || ''
+            }
+          ]}
+          buttons={[
+            { text: 'Cancelar', role: 'cancel' },
+            {
+              text: 'Guardar',
+              handler: async (data) => {
+                await handleRenameItem(data.newName || '');
+              }
+            }
+          ]}
+        />
+
+        <IonAlert
+          isOpen={showDeleteAlert}
+          onDidDismiss={() => setShowDeleteAlert(false)}
+          header="Eliminar"
+          message={`¿Seguro que querés eliminar "${selectedItem?.name || ''}"?`}
+          buttons={[
+            { text: 'Cancelar', role: 'cancel' },
+            {
+              text: 'Eliminar',
+              role: 'destructive',
+              handler: async () => {
+                await handleDeleteItem();
+              }
             }
           ]}
         />
@@ -558,11 +677,7 @@ const Home: React.FC = () => {
                 <img
                   src={previewImage}
                   alt={previewTitle}
-                  style={{
-                    maxWidth: '100%',
-                    borderRadius: '12px',
-                    marginTop: '10px'
-                  }}
+                  style={{ maxWidth: '100%', borderRadius: '12px', marginTop: '10px' }}
                 />
               </div>
             )}
